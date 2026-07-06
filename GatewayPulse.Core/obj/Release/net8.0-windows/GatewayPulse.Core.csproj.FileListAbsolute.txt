@@ -1,0 +1,12 @@
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\bin\Release\net8.0-windows\GatewayPulse.Core.deps.json
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\bin\Release\net8.0-windows\GatewayPulse.Core.dll
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\bin\Release\net8.0-windows\GatewayPulse.Core.pdb
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\GatewayPulse.Core.csproj.AssemblyReference.cache
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\GatewayPulse.Core.GeneratedMSBuildEditorConfig.editorconfig
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\GatewayPulse.Core.AssemblyInfoInputs.cache
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\GatewayPulse.Core.AssemblyInfo.cs
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\GatewayPulse.Core.csproj.CoreCompileInputs.cache
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\GatewayPulse.Core.dll
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\refint\GatewayPulse.Core.dll
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\GatewayPulse.Core.pdb
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard\GatewayPulse.Core\obj\Release\net8.0-windows\ref\GatewayPulse.Core.dll
