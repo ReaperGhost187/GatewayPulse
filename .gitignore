@@ -1,0 +1,14 @@
+.vs/
+*.user
+*.suo
+
+bin/
+obj/
+
+Publish/
+publish/
+Installer_Output/
+
+*.zip
+*.exe
+*.log
