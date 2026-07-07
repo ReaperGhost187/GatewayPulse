@@ -1,3 +1,5 @@
+<img width="1166" height="1349" alt="Dashboard" src="https://github.com/user-attachments/assets/5b01d438-a199-4d2b-8b20-4adb9b1f43e5" />
+<img width="1336" height="1183" alt="settings" src="https://github.com/user-attachments/assets/f039ee19-d5af-45ea-b783-aa3bb1fedf48" />
 # Gateway Pulse v0.8 Clean Service Solution
 
 Gateway Pulse is a read-only monitoring dashboard for RMS Relay and RMS Trimode gateways.
