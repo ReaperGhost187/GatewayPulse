@@ -5,37 +5,41 @@ namespace GatewayPulse.Core;
 
 public sealed class PushoverService
 {
-    private readonly PushoverOptions _options;
+    private readonly IOptionsMonitor<PushoverOptions> _options;
 
-    public int CooldownMinutes => Math.Max(_options.CooldownMinutes, 1);
-    public bool SendRecoveryAlerts => _options.SendRecoveryAlerts;
+    public int CooldownMinutes => Math.Max(_options.CurrentValue.CooldownMinutes, 1);
 
-    public PushoverService(IOptions<PushoverOptions> options)
+    public PushoverService(IOptionsMonitor<PushoverOptions> options)
     {
-        _options = options.Value;
+        _options = options;
     }
 
     public async Task<bool> SendAsync(string title, string message)
     {
-        if (!_options.Enabled)
+        return await SendAsync(title, message, _options.CurrentValue);
+    }
+
+    public async Task<bool> SendAsync(string title, string message, PushoverOptions options)
+    {
+        if (!options.Enabled)
             return false;
 
-        if (string.IsNullOrWhiteSpace(_options.UserKey) || string.IsNullOrWhiteSpace(_options.ApiToken))
+        if (string.IsNullOrWhiteSpace(options.UserKey) || string.IsNullOrWhiteSpace(options.ApiToken))
             return false;
 
         using var client = new HttpClient();
 
         var values = new Dictionary<string, string>
         {
-            { "token", _options.ApiToken },
-            { "user", _options.UserKey },
+            { "token", options.ApiToken },
+            { "user", options.UserKey },
             { "title", title },
             { "message", message },
-            { "priority", _options.Priority.ToString(CultureInfo.InvariantCulture) }
+            { "priority", options.Priority.ToString(CultureInfo.InvariantCulture) }
         };
 
-        if (!string.IsNullOrWhiteSpace(_options.Device))
-            values["device"] = _options.Device;
+        if (!string.IsNullOrWhiteSpace(options.Device))
+            values["device"] = options.Device;
 
         try
         {

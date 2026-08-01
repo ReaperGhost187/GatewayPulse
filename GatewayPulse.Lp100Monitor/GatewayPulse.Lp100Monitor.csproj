@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>GatewayPulse.Lp100Monitor</AssemblyName>
+    <RootNamespace>GatewayPulse.Lp100Monitor</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <ProjectReference Include="..\GatewayPulse.RfMonitoring\GatewayPulse.RfMonitoring.csproj" />
+  </ItemGroup>
+</Project>

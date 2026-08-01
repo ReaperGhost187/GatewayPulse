@@ -1,0 +1,19 @@
+﻿{
+    "schemaVersion":  1,
+    "updatedAt":  "2026-08-01T06:34:38.1922167+00:00",
+    "lastUpdate":  "2026-08-01T06:34:38.1922167+00:00",
+    "connected":  true,
+    "provider":  "mock",
+    "device":  "Mock LP-100A",
+    "connectionState":  "Connected",
+    "protocolStatus":  "OK",
+    "stale":  false,
+    "transmitting":  false,
+    "forwardPowerWatts":  0,
+    "reflectedPowerWatts":  0,
+    "lastPeakForwardPowerWatts":  95.4,
+    "powerRange":  "Mid",
+    "meterMode":  "Peak",
+    "comPort":  "MOCK",
+    "baudRate":  115200
+}

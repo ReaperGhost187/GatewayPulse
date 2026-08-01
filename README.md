@@ -1,56 +1,57 @@
-# Gateway Pulse v0.8 Clean Service Solution
+# Gateway Pulse v1.2 Multi-Device Power
 
-Gateway Pulse is a read-only monitoring dashboard for RMS Relay and RMS Trimode gateways.
+Gateway Pulse is a read-only Windows monitoring dashboard for RMS Relay and RMS Trimode gateways. This cloned development line preserves the proven Smart BatteryProtect integration and adds simultaneous Victron SmartShunt 300A Instant Readout support.
+
+The original working source remains untouched at:
+
+```text
+E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard
+```
+
+This extension is developed at:
+
+```text
+E:\GP-fromgpt\GatewayPulse_v2_Multi_Device_Power
+```
 
 ## Projects
 
-- `GatewayPulse.Core` — monitoring logic, memory reader, log parser, Pushover
-- `GatewayPulse.Service` — Windows Service host, Kestrel web dashboard
+- `GatewayPulse.Core` — gateway monitoring, memory/log parsing, and Pushover
+- `GatewayPulse.Service` — Windows Service, Kestrel API, dashboard, and collector supervision
+- `GatewayPulse.Tray` — notification-area client
+- `GatewayPulse.PowerMonitoring` — provider-neutral schema-v2 telemetry, composition, atomic JSON, and file reader
+- `GatewayPulse.VictronMonitor` — shared BLE scanner, BatteryProtect/SmartShunt decoders, multi-device manager, scan/device/mock modes
+- `GatewayPulse.VictronMonitor.Tests` — protocol, provider, manager, configuration, API/file, supervisor, and dashboard-state tests
 
-## Test in console mode
-
-```powershell
-cd .\GatewayPulse.Service
-.\run-console.ps1
-```
-
-Open:
+## Power flow
 
 ```text
-http://127.0.0.1:8080
+one BLE watcher -> address-specific decoders -> VictronPowerManager
+-> atomic C:\PWM\PowerTelemetry.json -> /api/power -> Power System card
 ```
 
-## Publish
+Every device has its own address and ACL-protected key file. Key values are never accepted as multi-device process arguments or emitted in telemetry, APIs, logs, or dashboard output. SmartShunt remains disabled until its real address and key file are supplied; BatteryProtect continues independently.
+
+## Canonical build
+
+Run from an ordinary PowerShell window on the development PC:
 
 ```powershell
-cd .\GatewayPulse.Service
-.\publish.ps1
+cd E:\GP-fromgpt\GatewayPulse_v2_Multi_Device_Power
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1
 ```
 
-## Install service
+The build runs Release .NET tests, Power System JavaScript state tests, multi-device configuration/ACL tests, four self-contained Windows publishes (service, tray, Victron, LP-100A), and Inno Setup compilation. Output:
 
-Run PowerShell as Administrator:
-
-```powershell
-cd .\GatewayPulse.Service\publish
-.\install-service.ps1
+```text
+Installer_Output\GatewayPulseSetup_v1.2.4.exe
 ```
 
-## Remove service
+## Documentation
 
-Run PowerShell as Administrator:
+- [`docs/POWER_MONITORING_ARCHITECTURE.md`](docs/POWER_MONITORING_ARCHITECTURE.md)
+- [`docs/VICTRON_BLE_PROTOCOL.md`](docs/VICTRON_BLE_PROTOCOL.md)
+- [`docs/GATEWAY_DEPLOYMENT.md`](docs/GATEWAY_DEPLOYMENT.md)
+- [`GatewayPulse.VictronMonitor/README.md`](GatewayPulse.VictronMonitor/README.md)
 
-```powershell
-cd .\GatewayPulse.Service\publish
-.\uninstall-service.ps1
-```
-
-## Installer direction
-
-For v1.0, normal users should not use PowerShell. The release goal is a normal Windows installer that asks for gateway name, callsign, log paths, Pushover keys, alert toggles, installs the service, adds firewall rule, and creates shortcuts.
-
-See `INSTALLER_PLAN.md`.
-
-## Important
-
-Keep v0.7 stable untouched. Treat this as v0.8 development.
+Do not modify the live gateway until the v1.2 installer is fully built, hashed, and verified and the rollback backup has been captured.

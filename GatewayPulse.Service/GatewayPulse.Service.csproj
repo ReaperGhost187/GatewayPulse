@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GatewayPulse.Core\GatewayPulse.Core.csproj" />
+    <ProjectReference Include="..\GatewayPulse.PowerMonitoring\GatewayPulse.PowerMonitoring.csproj" />
+    <ProjectReference Include="..\GatewayPulse.RfMonitoring\GatewayPulse.RfMonitoring.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
   </ItemGroup>
 
@@ -20,6 +22,13 @@
     </None>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- Local preview seeds — never ship in the production installer. -->
+    <Content Remove="mockup-*.json" />
+    <None Remove="mockup-*.json" />
+    <None Include="mockup-*.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 

@@ -11,6 +11,19 @@ public sealed class GatewayPulseOptions
     public string TrimodeHost { get; set; } = "127.0.0.1";
     public int TrimodeCommandPort { get; set; } = 8510;
     public bool ShowConnectingStations { get; set; } = true;
+    public RadioCatOptions RadioCat { get; set; } = new();
+}
+
+/// <summary>
+/// Optional Hamlib rigctld CAT frequency source for RF transmission logging.
+/// Prefer this over Winlink/Trimode when enabled and reachable.
+/// </summary>
+public sealed class RadioCatOptions
+{
+    public bool Enabled { get; set; }
+    public string Host { get; set; } = "127.0.0.1";
+    public int Port { get; set; } = 4532;
+    public int TimeoutMs { get; set; } = 400;
 }
 
 public sealed class PushoverOptions
@@ -21,7 +34,6 @@ public sealed class PushoverOptions
     public string Device { get; set; } = "";
     public int Priority { get; set; } = 0;
     public int CooldownMinutes { get; set; } = 5;
-    public bool SendRecoveryAlerts { get; set; } = true;
 }
 
 public sealed class AlertOptions
@@ -29,12 +41,36 @@ public sealed class AlertOptions
     public bool RelayOffline { get; set; } = true;
     public bool TrimodeOffline { get; set; } = true;
     public bool ScannerStopped { get; set; } = true;
-    public bool CommandPortFailed { get; set; } = true;
     public bool Recovery { get; set; } = true;
     public bool StationConnected { get; set; } = false;
 }
 
 public sealed record GatewayEvent(string Timestamp, string Source, string Type, string Detail);
+
+public sealed class StationConnection
+{
+    public string Timestamp { get; set; } = "";
+    public string Station { get; set; } = "";
+    public string Source { get; set; } = "";
+    public string Detail { get; set; } = "";
+}
+
+public sealed class UptimeMetric
+{
+    public string Name { get; set; } = "";
+    public bool Running { get; set; }
+    public string LastStarted { get; set; } = "";
+    public double Hours { get; set; }
+    public string Display { get; set; } = "Unknown";
+}
+
+public sealed class HourlyActivity
+{
+    public string Hour { get; set; } = "";
+    public int RelayConnections { get; set; }
+    public int TrimodeConnections { get; set; }
+    public int Disconnects { get; set; }
+}
 
 public sealed class ScanChannel
 {
@@ -50,6 +86,7 @@ public sealed class GatewayStatus
 {
     public string GatewayName { get; set; } = "";
     public string Callsign { get; set; } = "";
+    public bool DemoMode { get; set; }
     public bool Healthy { get; set; }
     public bool? RelayRunning { get; set; }
     public bool TrimodeSeen { get; set; }
@@ -62,7 +99,9 @@ public sealed class GatewayStatus
     public string MemoryAddress { get; set; } = "";
 
     public string? LastRelayEvent { get; set; }
+    public string? LastRelayStart { get; set; }
     public string? LastTrimodeEvent { get; set; }
+    public string? LastTrimodeStart { get; set; }
     public string? LastConnection { get; set; }
     public string? LastDisconnect { get; set; }
     public string? LastStation { get; set; }
@@ -73,9 +112,14 @@ public sealed class GatewayStatus
     public string DialFrequencyKhz { get; set; } = "--";
     public string CurrentMode { get; set; } = "PACTOR";
     public string LiveFrequencySource { get; set; } = "Configured";
+    /// <summary>UTC time the reported frequency was last observed from Trimode memory/CAT.</summary>
+    public DateTimeOffset? FrequencyUpdatedAt { get; set; }
 
     public List<ScanChannel> ScanChannels { get; set; } = new();
     public List<object> StationCounts { get; set; } = new();
+    public List<StationConnection> RecentStationConnections { get; set; } = new();
+    public List<HourlyActivity> HourlyActivity { get; set; } = new();
+    public List<UptimeMetric> UptimeMetrics { get; set; } = new();
     public List<GatewayEvent> RecentEvents { get; set; } = new();
     public string LastScan { get; set; } = "";
 }

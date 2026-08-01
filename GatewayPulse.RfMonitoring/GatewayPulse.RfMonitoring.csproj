@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GatewayPulse.RfMonitoring</RootNamespace>
+    <AssemblyName>GatewayPulse.RfMonitoring</AssemblyName>
+  </PropertyGroup>
+</Project>

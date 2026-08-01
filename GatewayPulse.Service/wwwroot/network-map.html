@@ -1,0 +1,252 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Gateway Pulse Network Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    :root{
+      color-scheme:dark;
+      --bg:#000206;
+      --panel:#050a10;
+      --panel2:#02050a;
+      --line:#142033;
+      --line2:#20324a;
+      --text:#eef4fb;
+      --muted:#8ca2b8;
+      --dim:#596b7e;
+      --blue:#4fc3f7;
+      --good:#32d583;
+    }
+
+    *{box-sizing:border-box}
+
+    body{
+      margin:0;
+      padding:18px;
+      background:
+        radial-gradient(circle at top left,rgba(79,195,247,.12),transparent 34%),
+        radial-gradient(circle at top right,rgba(50,213,131,.05),transparent 32%),
+        var(--bg);
+      color:var(--text);
+      font-family:"Segoe UI",system-ui,Arial,sans-serif;
+    }
+
+    .shell{max-width:980px;margin:0 auto}
+
+    .topbar,.card{
+      border:1px solid var(--line);
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
+      box-shadow:0 18px 50px rgba(0,0,0,.35);
+    }
+
+    .topbar{
+      border-radius:22px;
+      padding:22px;
+    }
+
+    .title{font-size:34px;font-weight:950;letter-spacing:.2px}
+    .subtitle{margin-top:6px;color:var(--muted);font-size:15px}
+
+    .nav{
+      display:flex;
+      gap:10px;
+      margin-top:14px;
+      flex-wrap:wrap;
+    }
+
+    .nav a{
+      color:var(--text);
+      text-decoration:none;
+      border:1px solid var(--line2);
+      border-radius:999px;
+      padding:8px 13px;
+      font-size:13px;
+      font-weight:850;
+      background:rgba(255,255,255,.025);
+    }
+
+    .nav a.active{border-color:rgba(79,195,247,.75);color:var(--blue)}
+
+    .card{
+      margin-top:16px;
+      border-radius:20px;
+      padding:22px;
+    }
+
+    .label{
+      color:var(--muted);
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      font-weight:850;
+      margin-bottom:12px;
+    }
+
+    .lead{
+      font-size:18px;
+      font-weight:850;
+      line-height:1.4;
+      margin:0 0 10px;
+    }
+
+    .meta,.note{
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.5;
+      margin:0 0 14px;
+    }
+
+    .meta b{color:var(--text)}
+
+    .note{
+      color:var(--dim);
+      font-size:13px;
+      border-top:1px solid var(--line);
+      padding-top:14px;
+      margin-bottom:0;
+    }
+
+    .actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin:18px 0 8px;
+    }
+
+    button,.link-btn{
+      border:1px solid rgba(79,195,247,.75);
+      border-radius:999px;
+      background:rgba(79,195,247,.12);
+      color:var(--text);
+      padding:11px 17px;
+      font-weight:900;
+      font:inherit;
+      font-size:14px;
+      cursor:pointer;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+    }
+
+    button.secondary,.link-btn.secondary{
+      border-color:var(--line2);
+      background:rgba(255,255,255,.03);
+    }
+
+    .footer{
+      margin-top:16px;
+      color:var(--dim);
+      text-align:center;
+      font-size:13px;
+    }
+
+    @media(max-width:720px){
+      body{padding:10px}
+      .title{font-size:28px}
+    }
+  </style>
+</head>
+
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="title">Gateway Pulse</div>
+    <div class="subtitle">Winlink RMS Channels network map</div>
+    <nav class="nav">
+      <a href="/">Dashboard</a>
+      <a class="active" href="/network-map.html">Network Map</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+  </header>
+
+  <main class="card">
+    <div class="label">Network Map</div>
+    <p class="lead">Winlink.org blocks embedding this map inside other websites.</p>
+    <p class="meta" id="map_meta">Loading Network Map settings...</p>
+    <p class="meta">
+      Open the map in a top-level browser window (or use <b>Gateway Pulse Tray → Network Map</b> for the embedded WebView2 window).
+      Your saved service code is passed as <code>servicecodes</code> so Winlink fills the Service Code(s) box.
+    </p>
+    <div class="actions">
+      <button id="open_map" type="button">Open Network Map</button>
+      <a class="link-btn secondary" href="/settings.html">Network Map Settings</a>
+    </div>
+    <p class="note" id="map_note">
+      Configure the service code under Settings → Network Map. Use the tray Network Map window for an in-app browser that is not limited by iframe framing rules.
+    </p>
+  </main>
+
+  <div class="footer">
+    Gateway Pulse • Read-only monitoring • Never transmits • Never controls Relay or Trimode<br />
+    Designed &amp; Developed by W7EWH
+  </div>
+</div>
+
+<script src="/network-map.js?v=1.0.2"></script>
+<script>
+let networkMapOptions = NetworkMap.defaults();
+let currentMapUrl = NetworkMap.DEFAULT_MAP_URL;
+let openedOnce = false;
+
+function escapeHtml(value){
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function setMeta(text){
+  document.getElementById('map_meta').innerHTML = text;
+}
+
+function openMap(){
+  window.open(currentMapUrl, 'gatewayPulseNetworkMap', 'noopener,noreferrer');
+}
+
+function buildMetaHtml(){
+  const code = networkMapOptions.serviceCode || '(none)';
+  const refresh = networkMapOptions.autoRefresh
+    ? `auto-refresh every ${networkMapOptions.autoRefreshMinutes} min (tray WebView2)`
+    : 'auto-refresh off';
+  const remember = networkMapOptions.rememberServiceCode ? 'remembered' : 'not remembered';
+  return `Service code: <b>${escapeHtml(code)}</b> · ${escapeHtml(remember)} · ${escapeHtml(refresh)}`;
+}
+
+async function loadNetworkMap(){
+  try{
+    const response = await fetch('/api/network-map', { cache:'no-store' });
+    if(!response.ok) throw new Error(`Unable to load Network Map settings (${response.status}).`);
+    const data = await response.json();
+    networkMapOptions = NetworkMap.normalize({
+      ...data,
+      autoOpenInBrowser: data.autoOpenInBrowser ?? data.AutoOpenInBrowser
+    });
+    if(typeof networkMapOptions.autoOpenInBrowser !== 'boolean'){
+      networkMapOptions.autoOpenInBrowser = data.autoOpenInBrowser !== false && data.AutoOpenInBrowser !== false;
+    }
+    currentMapUrl = data.resolvedMapUrl || data.ResolvedMapUrl ||
+      NetworkMap.buildMapUrl(networkMapOptions.mapUrl, networkMapOptions.serviceCode);
+    setMeta(buildMetaHtml());
+
+    const shouldAutoOpen = data.autoOpenInBrowser !== false && data.AutoOpenInBrowser !== false;
+    if(shouldAutoOpen && !openedOnce){
+      openedOnce = true;
+      openMap();
+      document.getElementById('map_note').textContent =
+        'Opened the Winlink map in a new window with your saved service code. Use the tray Network Map item for an embedded WebView2 window.';
+    }
+  }
+  catch(error){
+    currentMapUrl = NetworkMap.buildMapUrl(NetworkMap.DEFAULT_MAP_URL, '');
+    setMeta(`Using default map. ${escapeHtml(error.message || 'Settings unavailable.')}`);
+  }
+}
+
+document.getElementById('open_map').addEventListener('click', openMap);
+loadNetworkMap();
+</script>
+</body>
+</html>

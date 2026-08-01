@@ -9,20 +9,29 @@ namespace GatewayPulse.Core;
 
 public sealed class GatewayPulseService
 {
-    private readonly GatewayPulseOptions _options;
+    private readonly IOptionsMonitor<GatewayPulseOptions> _options;
+    private readonly IOptionsMonitor<AlertOptions> _alerts;
     private readonly PushoverService _pushover;
     private readonly object _lock = new();
 
     private GatewayStatus _status = new();
     private string _lastAlertStateKey = "";
+    private string _lastStationAlertKey = "";
+    private bool _stationAlertPrimed;
     private DateTime _lastAlertSentUtc = DateTime.MinValue;
+    private DateTime _lastStationAlertSentUtc = DateTime.MinValue;
     private IntPtr _cachedFrequencyAddress = IntPtr.Zero;
+    private decimal? _observedFrequencyKhz;
+    private string _observedFrequencySource = "Unknown";
+    private DateTimeOffset? _observedFrequencyUpdatedAt;
 
     public GatewayPulseService(
-        IOptions<GatewayPulseOptions> options,
+        IOptionsMonitor<GatewayPulseOptions> options,
+        IOptionsMonitor<AlertOptions> alerts,
         PushoverService pushover)
     {
-        _options = options.Value;
+        _options = options;
+        _alerts = alerts;
         _pushover = pushover;
         Refresh();
     }
@@ -36,26 +45,53 @@ public sealed class GatewayPulseService
         }
     }
 
+    /// <summary>
+    /// Best Winlink/Trimode frequency observation for RF TX logging (not CAT).
+    /// </summary>
+    public (decimal? FrequencyKhz, string Source, DateTimeOffset? UpdatedAt) GetWinlinkFrequencyObservation()
+    {
+        lock (_lock)
+        {
+            // Prefer the latest status without a full Refresh to keep TX sampling light.
+            if (_observedFrequencyKhz is > 0)
+                return (_observedFrequencyKhz, _observedFrequencySource, _observedFrequencyUpdatedAt);
+
+            if (_status.CurrentFrequencyKhz is string text &&
+                decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var khz) &&
+                khz > 0)
+            {
+                return (khz, string.IsNullOrWhiteSpace(_status.LiveFrequencySource) ? "Winlink" : _status.LiveFrequencySource, _status.FrequencyUpdatedAt);
+            }
+
+            return (null, "Unknown", null);
+        }
+    }
+
     private void Refresh()
     {
+        var options = _options.CurrentValue;
+
         var status = new GatewayStatus
         {
-            GatewayName = _options.GatewayName,
-            Callsign = _options.Callsign,
+            GatewayName = options.GatewayName,
+            Callsign = options.Callsign,
             LastScan = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
         };
 
         var eventsList = new List<GatewayEvent>();
         var stationCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var stationConnections = new List<StationConnection>();
+        var hourlyActivity = CreateHourlyActivity();
 
         status.RelayRunning = IsProcessRunning("RMS Relay");
         status.TrimodeSeen = IsProcessRunning("RMS Trimode");
 
-        ParseRelayLogs(status, eventsList, stationCounts);
-        ParseTrimodeLogs(status, eventsList);
+        ParseRelayLogs(status, eventsList, stationCounts, stationConnections, hourlyActivity);
+        ParseTrimodeLogs(status, eventsList, hourlyActivity);
         ParseTrimodeIni(status);
         PollTrimodeScannerStatus(status);
         TryReadTrimodeMemory(status);
+        ApplyProcessStartTimes(status);
 
         status.Healthy =
             status.RelayRunning == true &&
@@ -63,12 +99,21 @@ public sealed class GatewayPulseService
             status.ScannerEnabled != false;
 
         EvaluateAlerts(status);
+        EvaluateStationAlert(status);
 
         status.StationCounts = stationCounts
             .OrderByDescending(kv => kv.Value)
             .Select(kv => new { station = kv.Key, count = kv.Value })
             .Cast<object>()
             .ToList();
+
+        status.RecentStationConnections = stationConnections
+            .OrderByDescending(c => ParseAnyTime(c.Timestamp) ?? DateTime.MinValue)
+            .Take(50)
+            .ToList();
+
+        status.HourlyActivity = hourlyActivity;
+        status.UptimeMetrics = CreateUptimeMetrics(status);
 
         status.RecentEvents = eventsList
             .DistinctBy(e => $"{e.Timestamp}|{e.Source}|{e.Type}|{e.Detail}")
@@ -81,19 +126,17 @@ public sealed class GatewayPulseService
 
     private void EvaluateAlerts(GatewayStatus status)
     {
+        var alerts = _alerts.CurrentValue;
         var problems = new List<string>();
 
-        if (status.RelayRunning != true)
+        if (alerts.RelayOffline && status.RelayRunning != true)
             problems.Add("RMS Relay is offline");
 
-        if (!status.TrimodeSeen)
+        if (alerts.TrimodeOffline && !status.TrimodeSeen)
             problems.Add("RMS Trimode is offline");
 
-        if (status.TrimodeSeen && status.ScannerEnabled == false)
+        if (alerts.ScannerStopped && status.TrimodeSeen && status.ScannerEnabled == false)
             problems.Add("Scanner is stopped");
-
-        if (status.TrimodeSeen && status.ScannerEnabled is null)
-            problems.Add("Trimode command port is not responding");
 
         var currentStateKey = problems.Count == 0
             ? "HEALTHY"
@@ -112,20 +155,56 @@ public sealed class GatewayPulseService
         }
 
         _lastAlertStateKey = currentStateKey;
-        _lastAlertSentUtc = now;
 
         if (problems.Count > 0)
         {
+            _lastAlertSentUtc = now;
+
             _ = _pushover.SendAsync(
                 "🔴 Gateway Pulse Alert",
                 $"{status.GatewayName}\n\n{string.Join("\n", problems)}\n\n{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         }
-        else if (_pushover.SendRecoveryAlerts)
+        else if (alerts.Recovery)
         {
+            _lastAlertSentUtc = now;
+
             _ = _pushover.SendAsync(
                 "🟢 Gateway Pulse Recovery",
                 $"{status.GatewayName}\n\nGateway health is restored.\n\n{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         }
+    }
+
+    private void EvaluateStationAlert(GatewayStatus status)
+    {
+        var alerts = _alerts.CurrentValue;
+
+        if (!alerts.StationConnected || string.IsNullOrWhiteSpace(status.LastStation))
+            return;
+
+        var stationKey = $"{status.LastStation}|{status.LastRelayEvent}";
+        if (stationKey == _lastStationAlertKey)
+            return;
+
+        _lastStationAlertKey = stationKey;
+
+        if (!_stationAlertPrimed)
+        {
+            _stationAlertPrimed = true;
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        if (_lastStationAlertSentUtc != DateTime.MinValue &&
+            (now - _lastStationAlertSentUtc).TotalMinutes < _pushover.CooldownMinutes)
+        {
+            return;
+        }
+
+        _lastStationAlertSentUtc = now;
+
+        _ = _pushover.SendAsync(
+            "Gateway Pulse Station Connected",
+            $"{status.GatewayName}\n\nStation connected: {status.LastStation}\n\n{status.LastRelayEvent}");
     }
 
     private void TryReadTrimodeMemory(GatewayStatus status)
@@ -179,10 +258,10 @@ public sealed class GatewayPulseService
             var candidates = reader.FindInt32Candidates(expected, maxCandidates: 40);
 
             var chosen = candidates.FirstOrDefault(c => !c.LooksLikeArray);
-            if (chosen.Address == IntPtr.Zero && candidates.Count > 0)
+            if (chosen is null && candidates.Count > 0)
                 chosen = candidates[0];
 
-            if (chosen.Address == IntPtr.Zero)
+            if (chosen is null)
             {
                 status.MemoryReadStatus = "No frequency candidate found";
                 return;
@@ -201,13 +280,18 @@ public sealed class GatewayPulseService
         }
     }
 
-    private static void ApplyLiveFrequency(GatewayStatus status, int frequencyHz, string source, IntPtr address)
+    private void ApplyLiveFrequency(GatewayStatus status, int frequencyHz, string source, IntPtr address)
     {
-        var khz = frequencyHz / 1000.0;
+        var khz = frequencyHz / 1000.0m;
+        var now = DateTimeOffset.UtcNow;
         status.CurrentFrequencyKhz = khz.ToString("0.000", CultureInfo.InvariantCulture);
         status.DialFrequencyKhz = ((frequencyHz - 1500) / 1000.0).ToString("0.000", CultureInfo.InvariantCulture);
         status.LiveFrequencySource = source;
+        status.FrequencyUpdatedAt = now;
         status.MemoryAddress = "0x" + address.ToInt64().ToString("X");
+        _observedFrequencyKhz = khz;
+        _observedFrequencySource = source;
+        _observedFrequencyUpdatedAt = now;
 
         foreach (var ch in status.ScanChannels)
             ch.Active = ch.FrequencyHz == frequencyHz;
@@ -256,7 +340,8 @@ public sealed class GatewayPulseService
         try
         {
             using var tcp = new TcpClient();
-            var connectTask = tcp.ConnectAsync(_options.TrimodeHost, _options.TrimodeCommandPort);
+            var options = _options.CurrentValue;
+            var connectTask = tcp.ConnectAsync(options.TrimodeHost, options.TrimodeCommandPort);
             if (!connectTask.Wait(TimeSpan.FromMilliseconds(750)))
                 return "";
 
@@ -289,11 +374,13 @@ public sealed class GatewayPulseService
 
     private void ParseTrimodeIni(GatewayStatus status)
     {
-        if (!File.Exists(_options.TrimodeIni)) return;
+        var options = _options.CurrentValue;
+
+        if (!File.Exists(options.TrimodeIni)) return;
 
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var rawLine in SafeReadLines(_options.TrimodeIni))
+        foreach (var rawLine in SafeReadLines(options.TrimodeIni))
         {
             var line = rawLine.Trim();
             if (string.IsNullOrWhiteSpace(line)) continue;
@@ -334,9 +421,16 @@ public sealed class GatewayPulseService
         }
     }
 
-    private void ParseRelayLogs(GatewayStatus status, List<GatewayEvent> eventsList, Dictionary<string, int> stationCounts)
+    private void ParseRelayLogs(
+        GatewayStatus status,
+        List<GatewayEvent> eventsList,
+        Dictionary<string, int> stationCounts,
+        List<StationConnection> stationConnections,
+        List<HourlyActivity> hourlyActivity)
     {
-        foreach (var file in NewestFiles(_options.RelayLogs, new[] { "Events*.log", "*.log" }, 30))
+        var options = _options.CurrentValue;
+
+        foreach (var file in NewestFiles(options.RelayLogs, new[] { "Events*.log", "*.log" }, 200))
         {
             foreach (var line in SafeReadLines(file))
             {
@@ -346,6 +440,7 @@ public sealed class GatewayPulseService
                 if (line.Contains("RMS Relay started", StringComparison.OrdinalIgnoreCase))
                 {
                     status.LastRelayEvent = ts;
+                    SetIfNewer(ts, value => status.LastRelayStart = value, status.LastRelayStart);
                     eventsList.Add(new GatewayEvent(ts, "Relay", "Startup", "RMS Relay started"));
                 }
 
@@ -362,13 +457,24 @@ public sealed class GatewayPulseService
                     status.LastStation = station;
                     status.LastRelayEvent = ts;
                     stationCounts[station] = stationCounts.TryGetValue(station, out var c) ? c + 1 : 1;
+                    stationConnections.Add(new StationConnection
+                    {
+                        Timestamp = ts,
+                        Station = station,
+                        Source = "Relay",
+                        Detail = "HF client connection"
+                    });
+                    IncrementHourlyActivity(hourlyActivity, ParseAnyTime(ts), a => a.RelayConnections++);
                     eventsList.Add(new GatewayEvent(ts, "Relay", "HF Connection", $"HF client connection from {station}"));
                 }
             }
         }
     }
 
-    private void ParseTrimodeLogs(GatewayStatus status, List<GatewayEvent> eventsList)
+    private void ParseTrimodeLogs(
+        GatewayStatus status,
+        List<GatewayEvent> eventsList,
+        List<HourlyActivity> hourlyActivity)
     {
         DateTime newestTrimodeEvent = DateTime.MinValue;
         DateTime newestSfiTime = DateTime.MinValue;
@@ -376,8 +482,9 @@ public sealed class GatewayPulseService
 
         DateTime newestConnectionTime = DateTime.MinValue;
         DateTime newestDisconnectTime = DateTime.MinValue;
+        var options = _options.CurrentValue;
 
-        foreach (var file in NewestFiles(_options.TrimodeLogs, new[] { "*.log" }, 20))
+        foreach (var file in NewestFiles(options.TrimodeLogs, new[] { "*.log" }, 20))
         {
             foreach (var line in SafeReadLines(file))
             {
@@ -390,6 +497,13 @@ public sealed class GatewayPulseService
                 {
                     newestTrimodeEvent = dt;
                     status.LastTrimodeEvent = ts;
+                }
+
+                if (line.Contains("RMS Trimode started", StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains("RMS Trimode startup", StringComparison.OrdinalIgnoreCase))
+                {
+                    SetIfNewer(ts, value => status.LastTrimodeStart = value, status.LastTrimodeStart);
+                    eventsList.Add(new GatewayEvent(ts, "Trimode", "Startup", "RMS Trimode started"));
                 }
 
                 var sfi = Regex.Match(line, @"SFI\s*=\s*(\d+)", RegexOptions.IgnoreCase);
@@ -416,6 +530,7 @@ public sealed class GatewayPulseService
                     }
 
                     if (IsToday(ts)) status.SessionsToday++;
+                    IncrementHourlyActivity(hourlyActivity, dt, a => a.TrimodeConnections++);
 
                     eventsList.Add(new GatewayEvent(ts, "Trimode", "Connection", "PACTOR ARQ connection"));
                 }
@@ -428,6 +543,7 @@ public sealed class GatewayPulseService
                         status.LastDisconnect = ts;
                     }
 
+                    IncrementHourlyActivity(hourlyActivity, dt, a => a.Disconnects++);
                     eventsList.Add(new GatewayEvent(ts, "Trimode", "Disconnected", "PACTOR modem disconnected"));
                 }
 
@@ -440,6 +556,83 @@ public sealed class GatewayPulseService
             status.LastSfi = newestSfi.Value;
     }
 
+    private static List<HourlyActivity> CreateHourlyActivity()
+    {
+        return Enumerable.Range(0, 24)
+            .Select(hour => new HourlyActivity { Hour = $"{hour:00}:00" })
+            .ToList();
+    }
+
+    private static void IncrementHourlyActivity(List<HourlyActivity> hourlyActivity, DateTime? timestamp, Action<HourlyActivity> increment)
+    {
+        if (timestamp?.Date != DateTime.Today)
+            return;
+
+        increment(hourlyActivity[timestamp.Value.Hour]);
+    }
+
+    private static List<UptimeMetric> CreateUptimeMetrics(GatewayStatus status)
+    {
+        return new List<UptimeMetric>
+        {
+            CreateUptimeMetric("RMS Relay", status.RelayRunning == true, status.LastRelayStart),
+            CreateUptimeMetric("RMS Trimode", status.TrimodeSeen, status.LastTrimodeStart)
+        };
+    }
+
+    private static UptimeMetric CreateUptimeMetric(string name, bool running, string? lastStarted)
+    {
+        var started = string.IsNullOrWhiteSpace(lastStarted)
+            ? null
+            : ParseAnyTime(lastStarted);
+
+        var hours = running && started.HasValue
+            ? Math.Max(0, (DateTime.Now - started.Value).TotalHours)
+            : 0;
+
+        return new UptimeMetric
+        {
+            Name = name,
+            Running = running,
+            LastStarted = lastStarted ?? "",
+            Hours = Math.Round(hours, 2),
+            Display = running
+                ? started.HasValue ? FormatDuration(DateTime.Now - started.Value) : "Running, start time unknown"
+                : "Stopped"
+        };
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalDays >= 1)
+            return $"{(int)duration.TotalDays}d {duration.Hours}h";
+
+        if (duration.TotalHours >= 1)
+            return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+
+        return $"{Math.Max(0, duration.Minutes)}m";
+    }
+
+    private static void SetIfNewer(string timestamp, Action<string> setValue, string? currentValue)
+    {
+        var next = ParseAnyTime(timestamp);
+        var current = string.IsNullOrWhiteSpace(currentValue) ? null : ParseAnyTime(currentValue);
+
+        if (next.HasValue && (!current.HasValue || next.Value > current.Value))
+            setValue(timestamp);
+    }
+
+    private static void ApplyProcessStartTimes(GatewayStatus status)
+    {
+        var relayStart = GetProcessStartTime("RMS Relay");
+        if (relayStart.HasValue)
+            status.LastRelayStart = relayStart.Value.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+        var trimodeStart = GetProcessStartTime("RMS Trimode");
+        if (trimodeStart.HasValue)
+            status.LastTrimodeStart = trimodeStart.Value.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+    }
+
     private static bool IsProcessRunning(string processName)
     {
         try
@@ -450,6 +643,21 @@ public sealed class GatewayPulseService
         catch
         {
             return false;
+        }
+    }
+
+    private static DateTime? GetProcessStartTime(string processName)
+    {
+        try
+        {
+            var process = Process.GetProcesses()
+                .FirstOrDefault(p => p.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase));
+
+            return process?.StartTime;
+        }
+        catch
+        {
+            return null;
         }
     }
 

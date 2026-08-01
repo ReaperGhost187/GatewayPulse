@@ -1,0 +1,65 @@
+namespace GatewayPulse.RfMonitoring;
+
+/// <summary>
+/// Normalized RF wattmeter telemetry. Nullables omit unsupported or unavailable fields.
+/// </summary>
+public sealed class RfTelemetry
+{
+    public int SchemaVersion { get; set; } = 1;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset LastUpdate { get; set; } = DateTimeOffset.UtcNow;
+    public bool Connected { get; set; }
+    public string Provider { get; set; } = "unknown";
+    public string Device { get; set; } = "Unknown RF meter";
+    public string ConnectionState { get; set; } = RfConnectionStates.Disconnected;
+    public string? ProtocolStatus { get; set; }
+    public string? Error { get; set; }
+    public bool Stale { get; set; }
+    public bool Transmitting { get; set; }
+
+    public decimal? ForwardPowerWatts { get; set; }
+    public decimal? PeakForwardPowerWatts { get; set; }
+    public decimal? LastPeakForwardPowerWatts { get; set; }
+    public decimal? ReflectedPowerWatts { get; set; }
+    public decimal? Swr { get; set; }
+    public decimal? ReturnLossDb { get; set; }
+    public decimal? Dbm { get; set; }
+    public decimal? ImpedanceOhms { get; set; }
+    public decimal? PhaseDegrees { get; set; }
+    public decimal? ResistanceOhms { get; set; }
+    public decimal? ReactanceOhms { get; set; }
+    public string? PowerRange { get; set; }
+    public string? MeterMode { get; set; }
+    public string? MeterAlarmSetpoint { get; set; }
+    public string? Callsign { get; set; }
+    public string? ComPort { get; set; }
+    public int? BaudRate { get; set; }
+
+    public List<RfEvent> Events { get; set; } = [];
+}
+
+public sealed class RfEvent
+{
+    public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
+    public string Type { get; set; } = "";
+    public string Detail { get; set; } = "";
+}
+
+public static class RfConnectionStates
+{
+    public const string Connected = "Connected";
+    public const string Disconnected = "Disconnected";
+    public const string Stale = "Stale";
+    public const string Error = "Error";
+    public const string Connecting = "Connecting";
+}
+
+public static class RfStatuses
+{
+    public const string Healthy = "Healthy";
+    public const string Warning = "Warning";
+    public const string Critical = "Critical";
+    public const string Unavailable = "Unavailable";
+    public const string Idle = "Idle";
+    public const string Transmitting = "Transmitting";
+}

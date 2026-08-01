@@ -1,0 +1,11 @@
+{
+  "samples": [
+    {
+      "timestamp": "2026-08-01T06:34:38.1922167+00:00",
+      "forwardPowerWatts": 0,
+      "peakForwardPowerWatts": 95.4,
+      "reflectedPowerWatts": 0,
+      "transmitting": false
+    }
+  ]
+}

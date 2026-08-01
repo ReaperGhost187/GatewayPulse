@@ -1,0 +1,856 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Gateway Pulse Settings</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    :root{
+      color-scheme:dark;
+      --bg:#000206;
+      --panel:#050a10;
+      --panel2:#02050a;
+      --line:#142033;
+      --line2:#20324a;
+      --text:#eef4fb;
+      --muted:#8ca2b8;
+      --dim:#596b7e;
+      --blue:#4fc3f7;
+      --good:#32d583;
+      --bad:#ff5d73;
+      --warn:#ffb84d;
+    }
+
+    *{box-sizing:border-box}
+
+    body{
+      margin:0;
+      padding:18px;
+      background:
+        radial-gradient(circle at top left,rgba(79,195,247,.12),transparent 34%),
+        radial-gradient(circle at top right,rgba(50,213,131,.05),transparent 32%),
+        var(--bg);
+      color:var(--text);
+      font-family:"Segoe UI",system-ui,Arial,sans-serif;
+    }
+
+    .shell{max-width:900px;margin:0 auto}
+
+    .topbar,.card{
+      border:1px solid var(--line);
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
+      box-shadow:0 18px 50px rgba(0,0,0,.35);
+    }
+
+    .topbar{
+      border-radius:22px;
+      padding:22px;
+      margin-bottom:16px;
+    }
+
+    .title{font-size:34px;font-weight:950;letter-spacing:.2px}
+    .subtitle{margin-top:6px;color:var(--muted);font-size:15px}
+    .hint{margin:0 0 12px;color:var(--muted);font-size:14px;line-height:1.45}
+    .pref-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:0 18px;
+    }
+    .pref-actions{margin-top:8px}
+
+    .nav{
+      display:flex;
+      gap:10px;
+      margin-top:14px;
+      flex-wrap:wrap;
+    }
+
+    .nav a{
+      color:var(--text);
+      text-decoration:none;
+      border:1px solid var(--line2);
+      border-radius:999px;
+      padding:8px 13px;
+      font-size:13px;
+      font-weight:850;
+      background:rgba(255,255,255,.025);
+    }
+
+    .nav a.active{border-color:rgba(79,195,247,.75);color:var(--blue)}
+
+    .card{
+      border-radius:20px;
+      padding:18px;
+    }
+
+    .label{
+      color:var(--muted);
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      font-weight:850;
+      margin-bottom:14px;
+    }
+
+    .section{
+      padding:4px 0 18px;
+      margin-bottom:18px;
+      border-bottom:1px solid var(--line);
+    }
+
+    .section:last-of-type{
+      margin-bottom:0;
+      border-bottom:none;
+    }
+
+    .field-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:14px;
+    }
+
+    .field{
+      display:block;
+    }
+
+    .field span{
+      display:block;
+      color:var(--muted);
+      font-size:13px;
+      margin-bottom:7px;
+      font-weight:800;
+    }
+
+    input[type="text"],input[type="password"]{
+      width:100%;
+      border:1px solid var(--line2);
+      border-radius:12px;
+      background:rgba(255,255,255,.035);
+      color:var(--text);
+      padding:11px 12px;
+      font:inherit;
+      outline:none;
+    }
+
+    input[type="text"]:focus,input[type="password"]:focus{
+      border-color:rgba(79,195,247,.75);
+      box-shadow:0 0 0 3px rgba(79,195,247,.1);
+    }
+
+    .setting{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:16px;
+      padding:15px 0;
+      border-bottom:1px solid var(--line);
+      align-items:center;
+    }
+
+    .setting:last-child{border-bottom:none}
+    .setting b{display:block;margin-bottom:4px}
+    .setting span{color:var(--muted);font-size:14px}
+
+    input[type="checkbox"]{
+      width:24px;
+      height:24px;
+      accent-color:var(--blue);
+    }
+
+    .actions{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      margin-top:18px;
+      flex-wrap:wrap;
+    }
+
+    button{
+      border:1px solid rgba(79,195,247,.75);
+      border-radius:999px;
+      background:rgba(79,195,247,.12);
+      color:var(--text);
+      padding:11px 17px;
+      font-weight:900;
+      cursor:pointer;
+    }
+
+    button:disabled{
+      cursor:not-allowed;
+      opacity:.65;
+    }
+
+    .message{color:var(--muted);font-size:14px}
+    .message.good{color:var(--good)}
+    .message.bad{color:var(--bad)}
+
+    .footer{
+      margin-top:16px;
+      color:var(--dim);
+      text-align:center;
+      font-size:13px;
+    }
+
+    @media(max-width:720px){
+      .field-grid,.pref-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="title">Gateway Pulse Settings</div>
+    <div class="subtitle">Gateway identity, Pushover, Network Map, alerts, and dashboard preferences stored in appsettings.json</div>
+    <nav class="nav">
+      <a href="/">Dashboard</a>
+      <a href="/network-map.html">Network Map</a>
+      <a class="active" href="/settings.html">Settings</a>
+    </nav>
+  </header>
+
+  <main class="card">
+    <form id="settings_form">
+      <section class="section">
+        <div class="label">Gateway Identity</div>
+        <div class="field-grid">
+          <label class="field">
+            <span>Gateway name</span>
+            <input id="gatewayName" type="text" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span>Callsign</span>
+            <input id="callsign" type="text" autocomplete="off" />
+          </label>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="label">Pushover</div>
+        <label class="setting">
+          <span>
+            <b>Enable Pushover alerts</b>
+            <span>Use the Pushover user key and API token below when sending alerts.</span>
+          </span>
+          <input id="pushoverEnabled" type="checkbox" />
+        </label>
+
+        <div class="field-grid">
+          <label class="field">
+            <span>Pushover user key</span>
+            <input id="pushoverUserKey" type="password" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span>Pushover API token</span>
+            <input id="pushoverApiToken" type="password" autocomplete="off" />
+          </label>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="label">Pushover Alerts</div>
+        <label class="setting">
+          <span>
+            <b>Relay offline</b>
+            <span>Send an alert when RMS Relay is not running.</span>
+          </span>
+          <input id="relayOffline" type="checkbox" />
+        </label>
+
+        <label class="setting">
+          <span>
+            <b>Trimode offline</b>
+            <span>Send an alert when RMS Trimode is not running.</span>
+          </span>
+          <input id="trimodeOffline" type="checkbox" />
+        </label>
+
+        <label class="setting">
+          <span>
+            <b>Scanner stopped</b>
+            <span>Send an alert when Trimode is running but scanner status is stopped.</span>
+          </span>
+          <input id="scannerStopped" type="checkbox" />
+        </label>
+
+        <label class="setting">
+          <span>
+            <b>Recovery</b>
+            <span>Send an alert when Gateway Pulse returns to healthy after a problem.</span>
+          </span>
+          <input id="recovery" type="checkbox" />
+        </label>
+
+        <label class="setting">
+          <span>
+            <b>Station connected</b>
+            <span>Send an alert for newly observed station connections after startup.</span>
+          </span>
+          <input id="stationConnected" type="checkbox" />
+        </label>
+      </section>
+
+      <section class="section">
+        <div class="label">Network Map</div>
+        <p class="hint">
+          Configure the Winlink CMS gateway map shown on the Network Map tab.
+          The service code is applied as a URL parameter so Winlink autofills the Service Code(s) box.
+        </p>
+        <div class="field-grid">
+          <label class="field">
+            <span>Service code</span>
+            <input id="networkMapServiceCode" type="text" autocomplete="off" placeholder="SHARES" />
+          </label>
+          <label class="field">
+            <span>Auto-refresh interval (minutes)</span>
+            <input id="networkMapRefreshMinutes" type="text" autocomplete="off" inputmode="numeric" />
+          </label>
+        </div>
+        <label class="setting">
+          <span>
+            <b>Remember service code</b>
+            <span>Save the service code in appsettings.json so it is restored on every visit.</span>
+          </span>
+          <input id="networkMapRemember" type="checkbox" />
+        </label>
+        <label class="setting">
+          <span>
+            <b>Auto-refresh map</b>
+            <span>Reload the tray WebView2 Network Map window on the interval above.</span>
+          </span>
+          <input id="networkMapAutoRefresh" type="checkbox" />
+        </label>
+        <label class="setting">
+          <span>
+            <b>Auto-open in browser</b>
+            <span>When the Network Map tab opens, launch the Winlink map in a new browser window (required because Winlink blocks iframe embedding).</span>
+          </span>
+          <input id="networkMapAutoOpen" type="checkbox" />
+        </label>
+      </section>
+
+      <section class="section">
+        <div class="label">LP-100A / RF Monitoring</div>
+        <p class="hint">
+          Read-only TelePost LP-100A serial monitoring (115200 8N1, poll command P only).
+          Keep the meter on its Watts screen. Enabling requires the LP-100A collector installed under Service\Lp100Monitor.
+          Restart the Gateway Pulse service after changing enable/port so the supervisor reloads.
+        </p>
+        <label class="setting">
+          <span>
+            <b>Enable LP-100A monitoring</b>
+            <span>Start the out-of-process LP-100A collector and write C:\PWM\RfTelemetry.json.</span>
+          </span>
+          <input id="lp100Enabled" type="checkbox" />
+        </label>
+        <label class="setting">
+          <span>
+            <b>Auto-detect COM port</b>
+            <span>Try available serial ports when the preferred port is empty or unavailable.</span>
+          </span>
+          <input id="lp100AutoDetect" type="checkbox" />
+        </label>
+        <div class="field-grid">
+          <label class="field">
+            <span>COM port override</span>
+            <input id="lp100Port" type="text" autocomplete="off" placeholder="COM3" />
+          </label>
+          <label class="field">
+            <span>Baud rate</span>
+            <input id="lp100Baud" type="text" autocomplete="off" inputmode="numeric" placeholder="115200" />
+          </label>
+          <label class="field">
+            <span>TX threshold (W)</span>
+            <input id="lp100TxThreshold" type="text" autocomplete="off" inputmode="decimal" placeholder="0.05" />
+          </label>
+          <label class="field">
+            <span>TX end debounce (ms)</span>
+            <input id="lp100TxDebounce" type="text" autocomplete="off" inputmode="numeric" placeholder="750" />
+          </label>
+          <label class="field">
+            <span>SWR warning</span>
+            <input id="lp100SwrWarn" type="text" autocomplete="off" inputmode="decimal" />
+          </label>
+          <label class="field">
+            <span>SWR critical</span>
+            <input id="lp100SwrCrit" type="text" autocomplete="off" inputmode="decimal" />
+          </label>
+          <label class="field">
+            <span>Reflected warning (W)</span>
+            <input id="lp100ReflectedWarn" type="text" autocomplete="off" inputmode="decimal" />
+          </label>
+          <label class="field">
+            <span>High-power warning (W, optional)</span>
+            <input id="lp100HighPower" type="text" autocomplete="off" inputmode="decimal" placeholder="blank = off" />
+          </label>
+          <label class="field">
+            <span>Alert cooldown (minutes)</span>
+            <input id="lp100Cooldown" type="text" autocomplete="off" inputmode="numeric" />
+          </label>
+        </div>
+        <label class="setting">
+          <span><b>Enable RF history</b><span>Bounded forward/peak/reflected/SWR history for charts/API.</span></span>
+          <input id="lp100History" type="checkbox" />
+        </label>
+        <label class="setting">
+          <span><b>Enable RF Pushover alerts</b><span>High/critical SWR while transmitting, reflected power, disconnect, stale, recovery.</span></span>
+          <input id="lp100AlertsEnabled" type="checkbox" />
+        </label>
+        <label class="setting">
+          <span>
+            <b>Prefer radio CAT frequency (rigctld)</b>
+            <span>When enabled, TX history prefers Hamlib rigctld over Winlink/Trimode. Without CAT, Winlink frequency may be Stale if the radio was moved manually.</span>
+          </span>
+          <input id="radioCatEnabled" type="checkbox" />
+        </label>
+        <div class="field-grid">
+          <label class="field">
+            <span>rigctld host</span>
+            <input id="radioCatHost" type="text" autocomplete="off" placeholder="127.0.0.1" />
+          </label>
+          <label class="field">
+            <span>rigctld port</span>
+            <input id="radioCatPort" type="text" autocomplete="off" inputmode="numeric" placeholder="4532" />
+          </label>
+        </div>
+        <div class="actions pref-actions">
+          <button id="lp100Test" type="button">Test Connection</button>
+          <span class="message" id="lp100TestMessage"></span>
+        </div>
+        <p class="hint" id="lp100StatusHint">Connection status appears after Test Connection or when monitoring is enabled.</p>
+      </section>
+
+      <section class="section">
+        <div class="label">Preferences</div>
+        <p class="hint">
+          Choose which dashboard cards and Power System fields are visible.
+          Monitoring, alarms, logging, and API output continue even when items are hidden.
+          Active power alarms still appear in the main status banner if the Power System card is hidden.
+          RF primary metrics (Forward, Reflected, SWR, Peak) are always shown when the RF card is visible.
+        </p>
+
+        <div class="label" style="margin-top:8px">Dashboard cards</div>
+        <div class="pref-grid" id="pref_cards"></div>
+
+        <div class="label" style="margin-top:18px">Power System telemetry</div>
+        <div class="pref-grid" id="pref_telemetry"></div>
+
+        <div class="label" style="margin-top:18px">RF Metrics (expanded section)</div>
+        <div class="pref-grid" id="pref_rf_telemetry"></div>
+
+        <div class="actions pref-actions">
+          <button id="resetPreferences" type="button">Reset to Defaults</button>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="save" type="submit">Save Settings</button>
+        <button id="testPushover" type="button">Send Test Pushover</button>
+        <span class="message" id="message">Loading settings...</span>
+      </div>
+    </form>
+  </main>
+
+  <div class="footer">
+    Gateway Pulse only edits its own appsettings.json. It never controls Relay or Trimode.
+  </div>
+</div>
+
+<script src="/dashboard-preferences.js?v=1.0.1"></script>
+<script src="/network-map.js?v=1.0.0"></script>
+<script>
+const alertFields = [
+  ['relayOffline', 'RelayOffline'],
+  ['trimodeOffline', 'TrimodeOffline'],
+  ['scannerStopped', 'ScannerStopped'],
+  ['recovery', 'Recovery'],
+  ['stationConnected', 'StationConnected']
+];
+
+const cardLabels = {
+  gatewayStatus: 'Gateway Status',
+  configuredFrequency: 'Configured Frequency',
+  activity: 'Activity',
+  powerSystem: 'Power System',
+  powerEvents: 'Power Events',
+  rfPower: 'RF Power / SWR',
+  winlinkActivityToday: 'Winlink Activity Today',
+  scanChannels: 'Scan Channels',
+  stationConnectionCounts: 'Station Connection Counts',
+  uptimeSinceLastStart: 'Uptime Since Last Start',
+  last50Connections: 'Last 50 Connections',
+  recentWinlinkActivity: 'Recent Winlink Activity',
+  advancedDiagnostics: 'Advanced Diagnostics'
+};
+
+const telemetryLabels = {
+  stateOfCharge: 'State of Charge',
+  voltage: 'Voltage',
+  current: 'Current',
+  power: 'Power',
+  consumedAmpHours: 'Consumed Amp-hours',
+  estimatedRuntime: 'Estimated Runtime',
+  chargingDischargingState: 'Charging/Discharging State',
+  batteryProtectOutput: 'BatteryProtect Output',
+  alarm: 'Alarm',
+  rssi: 'RSSI',
+  deviceNameModel: 'Device Name/Model'
+};
+
+const rfTelemetryLabels = {
+  returnLoss: 'Return Loss',
+  dbm: 'dBm',
+  resistance: 'Resistance',
+  reactance: 'Reactance',
+  impedance: 'Impedance',
+  phase: 'Phase',
+  powerRange: 'Power Range',
+  meterMode: 'Meter Mode',
+  txState: 'TX State',
+  connectionState: 'Connection State',
+  lastUpdate: 'Last Update',
+  protocolStatus: 'Protocol Status'
+};
+
+const message = document.getElementById('message');
+const saveButton = document.getElementById('save');
+const testButton = document.getElementById('testPushover');
+const resetPreferencesButton = document.getElementById('resetPreferences');
+
+function readValue(settings, camelName, pascalName, fallback){
+  if(settings && Object.prototype.hasOwnProperty.call(settings, camelName)) return settings[camelName];
+  if(settings && Object.prototype.hasOwnProperty.call(settings, pascalName)) return settings[pascalName];
+  return fallback;
+}
+
+function setMessage(text, className){
+  message.textContent = text;
+  message.className = `message ${className || ''}`.trim();
+}
+
+function renderPreferenceToggles(hostId, labels, values, idPrefix){
+  const host = document.getElementById(hostId);
+  host.innerHTML = '';
+  for(const [key, label] of Object.entries(labels)){
+    const row = document.createElement('label');
+    row.className = 'setting';
+    row.innerHTML = `<span><b>${label}</b><span>Show on the dashboard.</span></span>`;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = `${idPrefix}_${key}`;
+    input.checked = values[key] !== false;
+    row.appendChild(input);
+    host.appendChild(row);
+  }
+}
+
+function applyPreferencesToForm(preferences){
+  const prefs = DashboardPreferences.normalize(preferences);
+  renderPreferenceToggles('pref_cards', cardLabels, prefs.cards, 'card');
+  renderPreferenceToggles('pref_telemetry', telemetryLabels, prefs.powerTelemetry, 'telemetry');
+  renderPreferenceToggles('pref_rf_telemetry', rfTelemetryLabels, prefs.rfTelemetry || {}, 'rftelemetry');
+}
+
+function readPreferencesFromForm(){
+  const cards = {};
+  for(const key of Object.keys(cardLabels)){
+    const el = document.getElementById(`card_${key}`);
+    cards[key] = !!(el && el.checked);
+  }
+  const powerTelemetry = {};
+  for(const key of Object.keys(telemetryLabels)){
+    const el = document.getElementById(`telemetry_${key}`);
+    powerTelemetry[key] = !!(el && el.checked);
+  }
+  const rfTelemetry = {};
+  for(const key of Object.keys(rfTelemetryLabels)){
+    const el = document.getElementById(`rftelemetry_${key}`);
+    rfTelemetry[key] = !!(el && el.checked);
+  }
+  return DashboardPreferences.normalize({ cards, powerTelemetry, rfTelemetry });
+}
+
+function preferencesPayload(preferences){
+  const prefs = DashboardPreferences.normalize(preferences);
+  const cards = {};
+  for(const [key, value] of Object.entries(prefs.cards)){
+    cards[key.charAt(0).toUpperCase() + key.slice(1)] = value;
+  }
+  const powerTelemetry = {};
+  for(const [key, value] of Object.entries(prefs.powerTelemetry)){
+    powerTelemetry[key.charAt(0).toUpperCase() + key.slice(1)] = value;
+  }
+  const rfTelemetry = {};
+  for(const [key, value] of Object.entries(prefs.rfTelemetry || {})){
+    rfTelemetry[key.charAt(0).toUpperCase() + key.slice(1)] = value;
+  }
+  return { Cards: cards, PowerTelemetry: powerTelemetry, RfTelemetry: rfTelemetry };
+}
+
+function applyLp100ToForm(lp){
+  const src = lp || {};
+  document.getElementById('lp100Enabled').checked = !!readValue(src, 'enabled', 'Enabled', false);
+  document.getElementById('lp100AutoDetect').checked = readValue(src, 'autoDetect', 'AutoDetect', true) !== false;
+  document.getElementById('lp100Port').value = readValue(src, 'port', 'Port', '');
+  document.getElementById('lp100Baud').value = String(readValue(src, 'baudRate', 'BaudRate', 115200));
+  document.getElementById('lp100TxThreshold').value = String(readValue(src, 'txThresholdWatts', 'TxThresholdWatts', 0.05));
+  document.getElementById('lp100TxDebounce').value = String(readValue(src, 'txEndDebounceMs', 'TxEndDebounceMs', 750));
+  document.getElementById('lp100History').checked = readValue(src, 'historyEnabled', 'HistoryEnabled', true) !== false;
+  const alerts = readValue(src, 'alerts', 'Alerts', {}) || {};
+  document.getElementById('lp100AlertsEnabled').checked = !!readValue(alerts, 'enabled', 'Enabled', false);
+  document.getElementById('lp100SwrWarn').value = String(readValue(alerts, 'swrWarning', 'SwrWarning', 2));
+  document.getElementById('lp100SwrCrit').value = String(readValue(alerts, 'swrCritical', 'SwrCritical', 3));
+  document.getElementById('lp100ReflectedWarn').value = String(readValue(alerts, 'reflectedWarningWatts', 'ReflectedWarningWatts', 25));
+  const high = readValue(alerts, 'highPowerWarningWatts', 'HighPowerWarningWatts', null);
+  document.getElementById('lp100HighPower').value = high == null ? '' : String(high);
+  document.getElementById('lp100Cooldown').value = String(readValue(alerts, 'cooldownMinutes', 'CooldownMinutes', 5));
+}
+
+function readLp100FromForm(){
+  const highRaw = document.getElementById('lp100HighPower').value.trim();
+  const high = highRaw === '' ? null : Number(highRaw);
+  return {
+    Enabled: document.getElementById('lp100Enabled').checked,
+    Port: document.getElementById('lp100Port').value.trim(),
+    AutoDetect: document.getElementById('lp100AutoDetect').checked,
+    BaudRate: Number(document.getElementById('lp100Baud').value) || 115200,
+    TxThresholdWatts: Number(document.getElementById('lp100TxThreshold').value) || 0.05,
+    TxEndDebounceMs: Number(document.getElementById('lp100TxDebounce').value) || 750,
+    ExecutablePath: 'Lp100Monitor\\GatewayPulse.Lp100Monitor.exe',
+    OutputPath: 'C:\\PWM\\RfTelemetry.json',
+    LogsPath: 'C:\\PWM\\logs',
+    IntervalMs: 250,
+    IdleIntervalMs: 1000,
+    RestartDelaySeconds: 10,
+    HistoryEnabled: document.getElementById('lp100History').checked,
+    Alerts: {
+      Enabled: document.getElementById('lp100AlertsEnabled').checked,
+      HighSwr: true,
+      CriticalSwr: true,
+      HighReflected: true,
+      Disconnected: true,
+      Stale: true,
+      Recovery: true,
+      SwrWarning: Number(document.getElementById('lp100SwrWarn').value) || 2,
+      SwrCritical: Number(document.getElementById('lp100SwrCrit').value) || 3,
+      ReflectedWarningWatts: Number(document.getElementById('lp100ReflectedWarn').value) || 25,
+      HighPowerWarningWatts: Number.isFinite(high) ? high : null,
+      CooldownMinutes: Number(document.getElementById('lp100Cooldown').value) || 5
+    }
+  };
+}
+
+async function loadSettings(){
+  try{
+    const response = await fetch('/api/settings');
+    if(!response.ok) throw new Error(`Load failed: ${response.status}`);
+
+    const settings = await response.json();
+    const gatewayPulse = readValue(settings, 'gatewayPulse', 'GatewayPulse', {});
+    const pushover = readValue(settings, 'pushover', 'Pushover', {});
+    const alerts = readValue(settings, 'alerts', 'Alerts', {});
+    const preferences = readValue(settings, 'preferences', 'Preferences', DashboardPreferences.defaults());
+    const networkMap = NetworkMap.normalize(readValue(settings, 'networkMap', 'NetworkMap', NetworkMap.defaults()));
+    const lp100 = readValue(settings, 'lp100Monitor', 'Lp100Monitor', {});
+
+    document.getElementById('gatewayName').value = readValue(gatewayPulse, 'gatewayName', 'GatewayName', '');
+    document.getElementById('callsign').value = readValue(gatewayPulse, 'callsign', 'Callsign', '');
+    document.getElementById('pushoverEnabled').checked = !!readValue(pushover, 'enabled', 'Enabled', false);
+    document.getElementById('pushoverUserKey').value = readValue(pushover, 'userKey', 'UserKey', '');
+    document.getElementById('pushoverApiToken').value = readValue(pushover, 'apiToken', 'ApiToken', '');
+
+    for(const [camelName, pascalName] of alertFields){
+      document.getElementById(camelName).checked = !!readValue(alerts, camelName, pascalName, false);
+    }
+
+    document.getElementById('networkMapServiceCode').value = networkMap.serviceCode || '';
+    document.getElementById('networkMapRemember').checked = !!networkMap.rememberServiceCode;
+    document.getElementById('networkMapAutoRefresh').checked = !!networkMap.autoRefresh;
+    document.getElementById('networkMapRefreshMinutes').value = String(networkMap.autoRefreshMinutes || 15);
+    document.getElementById('networkMapAutoOpen').checked = networkMap.autoOpenInBrowser !== false;
+
+    applyLp100ToForm(lp100);
+    const radioCat = readValue(gatewayPulse, 'radioCat', 'RadioCat', {}) || {};
+    document.getElementById('radioCatEnabled').checked = !!readValue(radioCat, 'enabled', 'Enabled', false);
+    document.getElementById('radioCatHost').value = readValue(radioCat, 'host', 'Host', '127.0.0.1');
+    document.getElementById('radioCatPort').value = String(readValue(radioCat, 'port', 'Port', 4532));
+    applyPreferencesToForm(preferences);
+    setMessage('Settings loaded.', 'good');
+  }
+  catch(error){
+    applyPreferencesToForm(DashboardPreferences.defaults());
+    setMessage(error.message || 'Unable to load settings.', 'bad');
+  }
+}
+
+function readNetworkMapFromForm(){
+  return NetworkMap.normalize({
+    serviceCode: document.getElementById('networkMapServiceCode').value,
+    rememberServiceCode: document.getElementById('networkMapRemember').checked,
+    autoRefresh: document.getElementById('networkMapAutoRefresh').checked,
+    autoRefreshMinutes: document.getElementById('networkMapRefreshMinutes').value,
+    autoOpenInBrowser: document.getElementById('networkMapAutoOpen').checked,
+    mapUrl: NetworkMap.DEFAULT_MAP_URL
+  });
+}
+
+document.getElementById('settings_form').addEventListener('submit', async event => {
+  event.preventDefault();
+  saveButton.disabled = true;
+  setMessage('Saving settings...');
+
+  const alerts = {};
+  for(const [camelName, pascalName] of alertFields){
+    alerts[pascalName] = document.getElementById(camelName).checked;
+  }
+
+  const payload = {
+    GatewayPulse:{
+      GatewayName:document.getElementById('gatewayName').value,
+      Callsign:document.getElementById('callsign').value,
+      RadioCat:{
+        Enabled: document.getElementById('radioCatEnabled').checked,
+        Host: document.getElementById('radioCatHost').value.trim() || '127.0.0.1',
+        Port: Number(document.getElementById('radioCatPort').value) || 4532,
+        TimeoutMs: 400
+      }
+    },
+    Pushover:{
+      Enabled:document.getElementById('pushoverEnabled').checked,
+      UserKey:document.getElementById('pushoverUserKey').value,
+      ApiToken:document.getElementById('pushoverApiToken').value
+    },
+    Alerts:alerts,
+    Preferences: preferencesPayload(readPreferencesFromForm()),
+    NetworkMap: (() => {
+      const map = readNetworkMapFromForm();
+      return {
+        ServiceCode: map.serviceCode,
+        RememberServiceCode: map.rememberServiceCode,
+        AutoRefresh: map.autoRefresh,
+        AutoRefreshMinutes: map.autoRefreshMinutes,
+        AutoOpenInBrowser: map.autoOpenInBrowser,
+        MapUrl: map.mapUrl
+      };
+    })(),
+    Lp100Monitor: readLp100FromForm()
+  };
+
+  try{
+    const response = await fetch('/api/settings', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+
+    if(!response.ok) throw new Error(`Save failed: ${response.status}`);
+    setMessage('Settings saved.', 'good');
+  }
+  catch(error){
+    setMessage(error.message || 'Unable to save settings.', 'bad');
+  }
+  finally{
+    saveButton.disabled = false;
+  }
+});
+
+resetPreferencesButton.addEventListener('click', () => {
+  applyPreferencesToForm(DashboardPreferences.defaults());
+  setMessage('Preferences reset to defaults. Save Settings to persist.', 'good');
+});
+
+testButton.addEventListener('click', async () => {
+  testButton.disabled = true;
+  setMessage('Sending Pushover test...');
+
+  try{
+    const response = await fetch('/api/testalert/settings', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        Enabled:true,
+        UserKey:document.getElementById('pushoverUserKey').value,
+        ApiToken:document.getElementById('pushoverApiToken').value
+      })
+    });
+
+    if(!response.ok) throw new Error(`Test failed: ${response.status}`);
+
+    const result = await response.json();
+    if(!result.ok) throw new Error('Pushover rejected the test or keys are missing.');
+
+    setMessage('Test Pushover sent.', 'good');
+  }
+  catch(error){
+    setMessage(error.message || 'Unable to send Pushover test.', 'bad');
+  }
+  finally{
+    testButton.disabled = false;
+  }
+});
+
+document.getElementById('lp100Test').addEventListener('click', async () => {
+  const btn = document.getElementById('lp100Test');
+  const msg = document.getElementById('lp100TestMessage');
+  const hint = document.getElementById('lp100StatusHint');
+  btn.disabled = true;
+  msg.textContent = 'Testing...';
+  msg.className = 'message';
+  try{
+    // Persist current LP-100 fields first so the test uses the form values.
+    await fetch('/api/settings', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        GatewayPulse:{
+          GatewayName:document.getElementById('gatewayName').value,
+          Callsign:document.getElementById('callsign').value
+        },
+        Pushover:{
+          Enabled:document.getElementById('pushoverEnabled').checked,
+          UserKey:document.getElementById('pushoverUserKey').value,
+          ApiToken:document.getElementById('pushoverApiToken').value
+        },
+        Alerts:Object.fromEntries(alertFields.map(([c,p]) => [p, document.getElementById(c).checked])),
+        Preferences: preferencesPayload(readPreferencesFromForm()),
+        NetworkMap: (() => {
+          const map = readNetworkMapFromForm();
+          return {
+            ServiceCode: map.serviceCode,
+            RememberServiceCode: map.rememberServiceCode,
+            AutoRefresh: map.autoRefresh,
+            AutoRefreshMinutes: map.autoRefreshMinutes,
+            AutoOpenInBrowser: map.autoOpenInBrowser,
+            MapUrl: map.mapUrl
+          };
+        })(),
+        Lp100Monitor: readLp100FromForm()
+      })
+    });
+    const response = await fetch('/api/rf/test-connection', { method:'POST' });
+    const result = await response.json();
+    if(!response.ok || !result.ok){
+      throw new Error((result && (result.error || (result.telemetry && result.telemetry.error))) || 'LP-100A test failed.');
+    }
+    const t = result.telemetry || {};
+    msg.textContent = 'Connected.';
+    msg.className = 'message good';
+    hint.textContent = `OK on ${t.comPort || 'COM'} @ ${t.baudRate || 115200}. Forward ${t.forwardPowerWatts ?? 0} W, SWR ${t.swr ?? '—'}.`;
+  }
+  catch(error){
+    msg.textContent = error.message || 'Test failed.';
+    msg.className = 'message bad';
+    hint.textContent = 'Confirm COM port, cable, and that the LP-100A is on the Watts screen. Stop any other app using the port.';
+  }
+  finally{
+    btn.disabled = false;
+  }
+});
+
+applyPreferencesToForm(DashboardPreferences.defaults());
+loadSettings();
+</script>
+</body>
+</html>
