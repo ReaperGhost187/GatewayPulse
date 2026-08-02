@@ -46,14 +46,8 @@ public sealed class ProcessMemoryReader : IDisposable
         while (results.Count < maxCandidates &&
                VirtualQueryEx(_handle, address, out var mbi, (UIntPtr)Marshal.SizeOf<MEMORY_BASIC_INFORMATION>()) != UIntPtr.Zero)
         {
-            var protect = mbi.Protect & 0xff;
-            bool readable =
-                mbi.State == MEM_COMMIT &&
-                (mbi.Protect & PAGE_GUARD) == 0 &&
-                protect != PAGE_NOACCESS;
-
-            if (readable)
-                ScanRegion(mbi.BaseAddress, mbi.RegionSize, expectedValues, results, maxCandidates);
+            if (IsReadable(mbi))
+                ScanRegionForExpected(mbi.BaseAddress, mbi.RegionSize, expectedValues, results, maxCandidates);
 
             long next = mbi.BaseAddress.ToInt64() + unchecked((long)mbi.RegionSize.ToUInt64());
             if (next <= address.ToInt64()) break;
@@ -63,7 +57,46 @@ public sealed class ProcessMemoryReader : IDisposable
         return results;
     }
 
-    private void ScanRegion(IntPtr baseAddress, UIntPtr regionSize, HashSet<int> expectedValues, List<MemoryCandidate> results, int maxCandidates)
+    /// <summary>
+    /// Scan committed readable memory for Int32 values in an HF Hz range.
+    /// Array-like neighborhoods are skipped so candidate capacity is not spent on config tables.
+    /// </summary>
+    public List<MemoryCandidate> FindInt32InRange(int minHz, int maxHz, int maxCandidates)
+    {
+        if (minHz > maxHz)
+            (minHz, maxHz) = (maxHz, minHz);
+
+        var results = new List<MemoryCandidate>();
+        IntPtr address = IntPtr.Zero;
+
+        while (results.Count < maxCandidates &&
+               VirtualQueryEx(_handle, address, out var mbi, (UIntPtr)Marshal.SizeOf<MEMORY_BASIC_INFORMATION>()) != UIntPtr.Zero)
+        {
+            if (IsReadable(mbi))
+                ScanRegionForRange(mbi.BaseAddress, mbi.RegionSize, minHz, maxHz, results, maxCandidates);
+
+            long next = mbi.BaseAddress.ToInt64() + unchecked((long)mbi.RegionSize.ToUInt64());
+            if (next <= address.ToInt64()) break;
+            address = new IntPtr(next);
+        }
+
+        return results;
+    }
+
+    private static bool IsReadable(MEMORY_BASIC_INFORMATION mbi)
+    {
+        var protect = mbi.Protect & 0xff;
+        return mbi.State == MEM_COMMIT &&
+               (mbi.Protect & PAGE_GUARD) == 0 &&
+               protect != PAGE_NOACCESS;
+    }
+
+    private void ScanRegionForExpected(
+        IntPtr baseAddress,
+        UIntPtr regionSize,
+        HashSet<int> expectedValues,
+        List<MemoryCandidate> results,
+        int maxCandidates)
     {
         const int chunkSize = 64 * 1024;
         long size = unchecked((long)regionSize.ToUInt64());
@@ -84,7 +117,7 @@ public sealed class ProcessMemoryReader : IDisposable
                     int value = BitConverter.ToInt32(buffer, i);
                     if (!expectedValues.Contains(value)) continue;
 
-                    bool looksLikeArray = LooksLikeFrequencyArray(buffer, i, expectedValues);
+                    bool looksLikeArray = TrimodeFrequencyHeuristics.LooksLikeFrequencyArray(buffer, i, expectedValues);
 
                     results.Add(new MemoryCandidate
                     {
@@ -99,21 +132,49 @@ public sealed class ProcessMemoryReader : IDisposable
         }
     }
 
-    private static bool LooksLikeFrequencyArray(byte[] buffer, int index, HashSet<int> expectedValues)
+    private void ScanRegionForRange(
+        IntPtr baseAddress,
+        UIntPtr regionSize,
+        int minHz,
+        int maxHz,
+        List<MemoryCandidate> results,
+        int maxCandidates)
     {
-        int matchesNearby = 0;
+        const int chunkSize = 64 * 1024;
+        long size = unchecked((long)regionSize.ToUInt64());
+        long offset = 0;
 
-        for (int delta = -32; delta <= 32; delta += 4)
+        while (offset < size && results.Count < maxCandidates)
         {
-            int pos = index + delta;
-            if (pos < 0 || pos + 4 > buffer.Length) continue;
+            int toRead = (int)Math.Min(chunkSize, size - offset);
+            byte[] buffer = new byte[toRead];
+            var addr = new IntPtr(baseAddress.ToInt64() + offset);
 
-            int value = BitConverter.ToInt32(buffer, pos);
-            if (expectedValues.Contains(value))
-                matchesNearby++;
+            if (ReadProcessMemory(_handle, addr, buffer, buffer.Length, out var bytesRead) && bytesRead.ToInt64() >= 4)
+            {
+                int limit = (int)bytesRead.ToInt64() - 4;
+
+                for (int i = 0; i <= limit && results.Count < maxCandidates; i += 4)
+                {
+                    int value = BitConverter.ToInt32(buffer, i);
+                    if (!TrimodeFrequencyHeuristics.IsPlausibleHfHz(value, minHz, maxHz))
+                        continue;
+
+                    // Skip frequency tables so capacity is reserved for live-looking cells.
+                    if (TrimodeFrequencyHeuristics.LooksLikeFrequencyArrayInRange(buffer, i, minHz, maxHz))
+                        continue;
+
+                    results.Add(new MemoryCandidate
+                    {
+                        Address = new IntPtr(addr.ToInt64() + i),
+                        Value = value,
+                        LooksLikeArray = false
+                    });
+                }
+            }
+
+            offset += toRead;
         }
-
-        return matchesNearby >= 2;
     }
 
     public void Dispose()

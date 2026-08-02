@@ -21,9 +21,16 @@ public sealed class GatewayPulseService
     private DateTime _lastAlertSentUtc = DateTime.MinValue;
     private DateTime _lastStationAlertSentUtc = DateTime.MinValue;
     private IntPtr _cachedFrequencyAddress = IntPtr.Zero;
+    private IntPtr _pendingDialAddress = IntPtr.Zero;
+    private int _pendingDialValue;
+    private int _pendingDialConfirmations;
+    private int _frequencyMissStreak;
     private decimal? _observedFrequencyKhz;
     private string _observedFrequencySource = "Unknown";
     private DateTimeOffset? _observedFrequencyUpdatedAt;
+
+    /// <summary>Consecutive memory-read misses before clearing TX observation (avoids flicker).</summary>
+    private const int FrequencyMissGracePolls = 2;
 
     public GatewayPulseService(
         IOptionsMonitor<GatewayPulseOptions> options,
@@ -47,22 +54,17 @@ public sealed class GatewayPulseService
 
     /// <summary>
     /// Best Winlink/Trimode frequency observation for RF TX logging (not CAT).
+    /// Only returns live Trimode memory/dial observations — never the INI channel-1 seed.
     /// </summary>
     public (decimal? FrequencyKhz, string Source, DateTimeOffset? UpdatedAt) GetWinlinkFrequencyObservation()
     {
         lock (_lock)
         {
-            // Prefer the latest status without a full Refresh to keep TX sampling light.
+            // Prefer the latest observation without a full Refresh to keep TX sampling light.
             if (_observedFrequencyKhz is > 0)
                 return (_observedFrequencyKhz, _observedFrequencySource, _observedFrequencyUpdatedAt);
 
-            if (_status.CurrentFrequencyKhz is string text &&
-                decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var khz) &&
-                khz > 0)
-            {
-                return (khz, string.IsNullOrWhiteSpace(_status.LiveFrequencySource) ? "Winlink" : _status.LiveFrequencySource, _status.FrequencyUpdatedAt);
-            }
-
+            // Do not fall back to ParseTrimodeIni channel-1 ("Configured") — that mis-tags TX history.
             return (null, "Unknown", null);
         }
     }
@@ -212,7 +214,7 @@ public sealed class GatewayPulseService
         if (!status.TrimodeSeen)
         {
             status.MemoryReadStatus = "Trimode offline";
-            _cachedFrequencyAddress = IntPtr.Zero;
+            ClearFrequencyObservation();
             return;
         }
 
@@ -222,9 +224,15 @@ public sealed class GatewayPulseService
             .Distinct()
             .ToHashSet();
 
-        if (expected.Count == 0)
+        var scannerStopped = status.ScannerEnabled == false;
+        var scannerScanning = status.ScannerEnabled == true;
+
+        // Scan-list match while scanning or when scanner state is unknown (safe default).
+        // When stopped, allow dial range scrape even if the INI scan list is empty.
+        if (!scannerStopped && expected.Count == 0)
         {
             status.MemoryReadStatus = "No configured frequencies to match";
+            NoteFrequencyMiss(status, "No configured frequencies to match");
             return;
         }
 
@@ -237,19 +245,27 @@ public sealed class GatewayPulseService
 
             if (proc is null)
             {
-                status.MemoryReadStatus = "Trimode process not found";
-                _cachedFrequencyAddress = IntPtr.Zero;
+                NoteFrequencyMiss(status, "Trimode process not found", clearCache: true);
                 return;
             }
 
             using var reader = new ProcessMemoryReader(proc.Id);
+
+            if (scannerStopped)
+            {
+                TryReadTrimodeDialFrequency(status, reader, expected);
+                return;
+            }
+
+            // Scanning or unknown: scan-list Int32 match only.
+            ResetPendingDialCandidate();
 
             if (_cachedFrequencyAddress != IntPtr.Zero &&
                 reader.TryReadInt32(_cachedFrequencyAddress, out var cachedValue) &&
                 expected.Contains(cachedValue))
             {
                 ApplyLiveFrequency(status, cachedValue, "Trimode memory", _cachedFrequencyAddress);
-                status.MemoryReadStatus = "OK cached";
+                status.MemoryReadStatus = scannerScanning ? "OK cached (scan)" : "OK cached";
                 return;
             }
 
@@ -263,7 +279,7 @@ public sealed class GatewayPulseService
 
             if (chosen is null)
             {
-                status.MemoryReadStatus = "No frequency candidate found";
+                NoteFrequencyMiss(status, "No frequency candidate found");
                 return;
             }
 
@@ -275,9 +291,78 @@ public sealed class GatewayPulseService
         }
         catch (Exception ex)
         {
-            status.MemoryReadStatus = "Memory read error: " + ex.GetType().Name;
-            _cachedFrequencyAddress = IntPtr.Zero;
+            NoteFrequencyMiss(status, "Memory read error: " + ex.GetType().Name, clearCache: true);
         }
+    }
+
+    private void TryReadTrimodeDialFrequency(
+        GatewayStatus status,
+        ProcessMemoryReader reader,
+        HashSet<int> expected)
+    {
+        // Fast path: re-read cached address if it still holds a plausible HF Hz (covers QSY at same cell).
+        if (_cachedFrequencyAddress != IntPtr.Zero &&
+            reader.TryReadInt32(_cachedFrequencyAddress, out var cachedValue) &&
+            TrimodeFrequencyHeuristics.IsPlausibleHfHz(cachedValue))
+        {
+            ResetPendingDialCandidate();
+            ApplyLiveFrequency(status, cachedValue, "Trimode dial", _cachedFrequencyAddress);
+            status.MemoryReadStatus = expected.Contains(cachedValue)
+                ? "OK cached dial (on scan list)"
+                : "OK cached dial";
+            return;
+        }
+
+        _cachedFrequencyAddress = IntPtr.Zero;
+
+        var candidates = reader.FindInt32InRange(
+            TrimodeFrequencyHeuristics.HfMinHz,
+            TrimodeFrequencyHeuristics.HfMaxHz,
+            TrimodeFrequencyHeuristics.DefaultMaxRangeCandidates);
+
+        int? previousHz = _observedFrequencyKhz is > 0
+            ? (int)(_observedFrequencyKhz.Value * 1000m)
+            : null;
+
+        var chosen = TrimodeFrequencyHeuristics.ChooseDialCandidate(
+            candidates,
+            _pendingDialAddress != IntPtr.Zero ? _pendingDialAddress : IntPtr.Zero,
+            previousHz);
+
+        if (chosen is null)
+        {
+            ResetPendingDialCandidate();
+            NoteFrequencyMiss(status, candidates.Count == 0
+                ? "No dial frequency candidate found"
+                : $"Dial frequency ambiguous ({candidates.Count} candidates)");
+            return;
+        }
+
+        // Require the same address across consecutive polls before promoting a new dial cell.
+        if (_pendingDialAddress == chosen.Address && _pendingDialValue == chosen.Value)
+        {
+            _pendingDialConfirmations++;
+        }
+        else
+        {
+            _pendingDialAddress = chosen.Address;
+            _pendingDialValue = chosen.Value;
+            _pendingDialConfirmations = 1;
+        }
+
+        if (_pendingDialConfirmations < 2)
+        {
+            status.MemoryReadStatus = "Dial candidate pending confirmation";
+            // Keep last confirmed observation during discovery; do not invent a new stamp yet.
+            return;
+        }
+
+        _cachedFrequencyAddress = chosen.Address;
+        ResetPendingDialCandidate();
+        ApplyLiveFrequency(status, chosen.Value, "Trimode dial", chosen.Address);
+        status.MemoryReadStatus = expected.Contains(chosen.Value)
+            ? $"OK dial candidate ({candidates.Count})"
+            : $"OK dial candidate off-list ({candidates.Count})";
     }
 
     private void ApplyLiveFrequency(GatewayStatus status, int frequencyHz, string source, IntPtr address)
@@ -292,9 +377,38 @@ public sealed class GatewayPulseService
         _observedFrequencyKhz = khz;
         _observedFrequencySource = source;
         _observedFrequencyUpdatedAt = now;
+        _frequencyMissStreak = 0;
 
+        // Off-list dial leaves all Active flags false (INI may have seeded channel 1).
         foreach (var ch in status.ScanChannels)
             ch.Active = ch.FrequencyHz == frequencyHz;
+    }
+
+    private void NoteFrequencyMiss(GatewayStatus status, string message, bool clearCache = false)
+    {
+        status.MemoryReadStatus = message;
+        if (clearCache)
+            _cachedFrequencyAddress = IntPtr.Zero;
+
+        _frequencyMissStreak++;
+        if (_frequencyMissStreak >= FrequencyMissGracePolls)
+            ClearFrequencyObservation();
+    }
+
+    private void ClearFrequencyObservation()
+    {
+        _cachedFrequencyAddress = IntPtr.Zero;
+        ResetPendingDialCandidate();
+        _observedFrequencyKhz = null;
+        _observedFrequencySource = "Unknown";
+        _observedFrequencyUpdatedAt = null;
+    }
+
+    private void ResetPendingDialCandidate()
+    {
+        _pendingDialAddress = IntPtr.Zero;
+        _pendingDialValue = 0;
+        _pendingDialConfirmations = 0;
     }
 
     private void PollTrimodeScannerStatus(GatewayStatus status)
