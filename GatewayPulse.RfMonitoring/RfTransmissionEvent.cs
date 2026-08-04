@@ -87,21 +87,35 @@ public sealed class FrequencySnapshot
 }
 
 /// <summary>
-/// One completed (or in-progress) RF transmission detected from wattmeter forward power.
-/// Independent of Trimode/Winlink session state.
+/// One completed (or in-progress) RF transmission session detected from wattmeter forward power.
+/// Bursty modes (PACTOR) coalesce multiple overs separated by less than SessionCoalesceMs
+/// into a single session. Independent of Trimode/Winlink session state.
 /// </summary>
 public sealed class RfTransmissionEvent
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public DateTimeOffset StartTime { get; set; }
     public DateTimeOffset? EndTime { get; set; }
+    /// <summary>Wall-clock session duration including inter-burst gaps while coalescing.</summary>
     public double? DurationSeconds { get; set; }
     public bool InProgress { get; set; }
 
+    /// <summary>Number of forward-power bursts merged into this session (PACTOR overs).</summary>
+    public int BurstCount { get; set; } = 1;
+
     public decimal PeakForwardPowerWatts { get; set; }
+    /// <summary>Max reflected power derived from SWR (not a direct LP-100A measurement).</summary>
     public decimal MaxReflectedPowerWatts { get; set; }
-    public decimal MaxSwr { get; set; }
-    public decimal AverageSwr { get; set; }
+    public string MaxReflectedPowerSource { get; set; } = RfReflectedPowerSources.Calculated;
+
+    /// <summary>
+    /// Max SWR accepted only while forward power ≥ SwrMinForwardWatts (valid samples).
+    /// Null when no valid SWR sample was seen.
+    /// </summary>
+    public decimal? MaxSwr { get; set; }
+    public decimal? AverageSwr { get; set; }
+    /// <summary>True when max/avg SWR sits at the LP-100A floor (exactly 1.00).</summary>
+    public bool SwrAtResolutionFloor { get; set; }
 
     public decimal? StartFrequencyKhz { get; set; }
     public decimal? EndFrequencyKhz { get; set; }
@@ -110,4 +124,9 @@ public sealed class RfTransmissionEvent
     public string FrequencyConfidence { get; set; } = FrequencyConfidenceLevels.Unknown;
     public bool FrequencyChangedDuringTx { get; set; }
     public string? FrequencyNote { get; set; }
+}
+
+public static class RfReflectedPowerSources
+{
+    public const string Calculated = "calculated";
 }

@@ -54,10 +54,13 @@ public sealed class MockRfProvider : IRfMonitor
             Transmitting = false,
             ForwardPowerWatts = 0m,
             ReflectedPowerWatts = 0m,
+            ReflectedPowerWattsCalculated = 0m,
+            ReflectedPowerSource = RfReflectedPowerSources.Calculated,
             PeakForwardPowerWatts = null,
             LastPeakForwardPowerWatts = _lastPeak,
             PowerRange = "High",
             MeterMode = "Average",
+            MeterModeHint = RfDerivedMetrics.PeakHoldHint,
             MeterAlarmSetpoint = "2.0",
             Callsign = "MOCK",
             ComPort = "MOCK",
@@ -85,7 +88,10 @@ public sealed class MockRfProvider : IRfMonitor
             PeakForwardPowerWatts = _sessionPeak,
             LastPeakForwardPowerWatts = _lastPeak,
             ReflectedPowerWatts = reflected,
+            ReflectedPowerWattsCalculated = reflected,
+            ReflectedPowerSource = RfReflectedPowerSources.Calculated,
             Swr = swr,
+            SwrAtResolutionFloor = RfDerivedMetrics.IsSwrAtResolutionFloor(swr),
             ReturnLossDb = RfDerivedMetrics.ReturnLossDb(swr),
             Dbm = 10m * (decimal)Math.Log10((double)Math.Max(forward, 0.001m)) + 30m,
             ImpedanceOhms = 50m,
@@ -97,7 +103,8 @@ public sealed class MockRfProvider : IRfMonitor
             MeterAlarmSetpoint = "2.0",
             Callsign = "MOCK",
             ComPort = "MOCK",
-            BaudRate = 115200
+            BaudRate = 115200,
+            LastRawFrameBody = $"{forward:0.00},50.0,0.0,0,MOCK  ,0,1,40.0,{swr:0.00}"
         };
     }
 

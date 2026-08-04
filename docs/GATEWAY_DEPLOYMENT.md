@@ -5,7 +5,7 @@ This package upgrades the proven BatteryProtect integration without changing the
 ## Production paths
 
 ```text
-Installer:          GatewayPulseSetup_v1.2.5.exe
+Installer:          GatewayPulseSetup_v1.2.8.exe
 Service:            C:\Program Files\Gateway Pulse\Service\GatewayPulse.exe
 Collector:          C:\Program Files\Gateway Pulse\Service\VictronMonitor\GatewayPulse.VictronMonitor.exe
 Configuration:      C:\Program Files\Gateway Pulse\Service\appsettings.json
@@ -112,15 +112,15 @@ The installer validates and applies the protected ACL. It never overwrites this 
 Copy these two files to a staging folder on the gateway:
 
 ```text
-GatewayPulseSetup_v1.2.5.exe
-GatewayPulseSetup_v1.2.5.sha256.txt
+GatewayPulseSetup_v1.2.8.exe
+GatewayPulseSetup_v1.2.8.sha256.txt
 ```
 
 Verify before running:
 
 ```powershell
-Get-FileHash .\GatewayPulseSetup_v1.2.5.exe -Algorithm SHA256
-Get-Content .\GatewayPulseSetup_v1.2.5.sha256.txt
+Get-FileHash .\GatewayPulseSetup_v1.2.8.exe -Algorithm SHA256
+Get-Content .\GatewayPulseSetup_v1.2.8.sha256.txt
 ```
 
 The values must match exactly.
@@ -128,7 +128,7 @@ The values must match exactly.
 ## 5. Install or upgrade
 
 ```powershell
-Start-Process .\GatewayPulseSetup_v1.2.5.exe -Verb RunAs -Wait
+Start-Process .\GatewayPulseSetup_v1.2.8.exe -Verb RunAs -Wait
 ```
 
 Installer flow:
@@ -296,6 +296,8 @@ Restart-Service GatewayPulse
 ```
 
 Telemetry lands at `C:\PWM\RfTelemetry.json`; TX events at `C:\PWM\RfTransmissionHistory.json`. Confirm on the dashboard Station RF card and `/api/rf`.
+
+Polling timing is editable in Settings → LP-100A / RF Monitoring (`IntervalMs`, `IdleIntervalMs`, `SessionCoalesceMs`). For PACTOR, enable Peak Hold on the LP-100A (operator setting — Gateway Pulse never sends F/A/M), use TX poll ~50–80 ms, and session coalesce ~6000 ms so overs merge into one Transmission History session (new installs default coalesce to 6000; `TxEndDebounceMs` remains a legacy alias). Existing saved values are left unchanged on upgrade. Use **RF Analysis** (`/rf-analysis.html`) for synchronized timelines.
 
 Optional frequency tagging for Transmission History (Hamlib `rigctld`):
 

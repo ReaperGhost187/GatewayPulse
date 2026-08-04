@@ -5,7 +5,7 @@ namespace GatewayPulse.VictronMonitor.Tests;
 public sealed class RfTransmissionTrackerTests
 {
     [Fact]
-    public void Process_CreatesEventOnThresholdAndCompletesAfterDebounce()
+    public void Process_CreatesEventOnThresholdAndCompletesAfterCoalesce()
     {
         var tracker = new RfTransmissionTracker(0.05m, TimeSpan.FromMilliseconds(200));
         var t0 = DateTimeOffset.Parse("2026-08-01T00:00:00Z");
@@ -20,12 +20,73 @@ public sealed class RfTransmissionTrackerTests
         var completed = tracker.Process(0m, 0m, null, live, t0.AddMilliseconds(650));
         Assert.NotNull(completed);
         Assert.False(completed!.InProgress);
+        Assert.Equal(1, completed.BurstCount);
         Assert.Equal(90m, completed.PeakForwardPowerWatts);
         Assert.Equal(3m, completed.MaxReflectedPowerWatts);
+        Assert.Equal(RfReflectedPowerSources.Calculated, completed.MaxReflectedPowerSource);
         Assert.Equal(1.3m, completed.MaxSwr);
         Assert.Equal(7185.0m, completed.StartFrequencyKhz);
         Assert.Equal(FrequencySources.Winlink, completed.FrequencySource);
         Assert.Equal(FrequencyConfidenceLevels.Live, completed.FrequencyConfidence);
+    }
+
+    [Fact]
+    public void Process_CoalescesPactorBurstsIntoOneSession()
+    {
+        var tracker = new RfTransmissionTracker(0.05m, TimeSpan.FromMilliseconds(6000));
+        var t0 = DateTimeOffset.Parse("2026-08-01T00:00:00Z");
+        var live = FrequencySnapshot.FromObservation(7100m, "Winlink", t0, t0);
+
+        Assert.Null(tracker.Process(50m, 1m, 1.2m, live, t0));
+        Assert.Null(tracker.Process(0m, 0m, null, live, t0.AddSeconds(1)));
+        // Gap < 6000 ms — still same session
+        Assert.Null(tracker.Process(60m, 2m, 1.4m, live, t0.AddSeconds(3)));
+        Assert.NotNull(tracker.Active);
+        Assert.Equal(2, tracker.Active!.BurstCount);
+        Assert.Equal(60m, tracker.Active.PeakForwardPowerWatts);
+        Assert.Equal(1.4m, tracker.Active.MaxSwr);
+
+        Assert.Null(tracker.Process(0m, 0m, null, live, t0.AddSeconds(4)));
+        Assert.Null(tracker.Process(0m, 0m, null, live, t0.AddSeconds(9))); // 5s quiet — still coalescing
+        var completed = tracker.Process(0m, 0m, null, live, t0.AddSeconds(10.1)); // >6s after last drop
+        Assert.NotNull(completed);
+        Assert.Equal(2, completed!.BurstCount);
+        Assert.Equal(60m, completed.PeakForwardPowerWatts);
+        Assert.Equal(1.4m, completed.MaxSwr);
+        Assert.True(completed.DurationSeconds >= 10);
+    }
+
+    [Fact]
+    public void Process_IgnoresSwrBelowMinForward()
+    {
+        var tracker = new RfTransmissionTracker(
+            0.05m,
+            TimeSpan.FromMilliseconds(200),
+            swrMinForwardWatts: 0.5m);
+        var t0 = DateTimeOffset.Parse("2026-08-01T00:00:00Z");
+        var live = FrequencySnapshot.FromObservation(7100m, "Winlink", t0, t0);
+
+        tracker.Process(0.2m, 0.1m, 3.5m, live, t0); // above TX threshold but below SWR min
+        Assert.NotNull(tracker.Active);
+        Assert.Null(tracker.Active!.MaxSwr);
+
+        tracker.Process(10m, 0.5m, 1.25m, live, t0.AddMilliseconds(50));
+        Assert.Equal(1.25m, tracker.Active.MaxSwr);
+
+        tracker.Process(0m, 0m, null, live, t0.AddMilliseconds(100));
+        var completed = tracker.Process(0m, 0m, null, live, t0.AddMilliseconds(350));
+        Assert.NotNull(completed);
+        Assert.Equal(1.25m, completed!.MaxSwr);
+        Assert.Equal(10m, completed.PeakForwardPowerWatts);
+    }
+
+    [Fact]
+    public void FormatSwrDisplay_ShowsResolutionFloor()
+    {
+        Assert.Equal("≤1.00", RfTransmissionTracker.FormatSwrDisplay(1.00m, true));
+        Assert.Equal("≤1.00", RfTransmissionTracker.FormatSwrDisplay(1.00m));
+        Assert.Equal("1.25", RfTransmissionTracker.FormatSwrDisplay(1.25m));
+        Assert.Equal("—", RfTransmissionTracker.FormatSwrDisplay(null));
     }
 
     [Fact]

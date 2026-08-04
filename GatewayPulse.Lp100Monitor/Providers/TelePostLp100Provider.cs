@@ -1,3 +1,4 @@
+using GatewayPulse.Lp100Monitor.Logging;
 using GatewayPulse.Lp100Monitor.Protocol;
 using GatewayPulse.Lp100Monitor.Serial;
 using GatewayPulse.RfMonitoring;
@@ -7,9 +8,12 @@ namespace GatewayPulse.Lp100Monitor.Providers;
 /// <summary>
 /// Read-only LP-100A provider. Sends only the documented poll command 'P'.
 /// Never sends A/M/F (those change meter configuration / display).
+/// Serial values are display snapshots — prefer operator Peak Hold for PACTOR.
 /// </summary>
 public sealed class TelePostLp100Provider : IRfMonitor
 {
+    private const int MaxRecentRawFrames = 8;
+
     private readonly Func<string, int, ISerialPortSession> _portFactory;
     private readonly string? _preferredPort;
     private readonly bool _autoDetect;
@@ -17,12 +21,15 @@ public sealed class TelePostLp100Provider : IRfMonitor
     private readonly decimal _txThresholdWatts;
     private readonly SerialFramer _framer = new();
     private readonly List<RfEvent> _events = [];
+    private readonly List<string> _recentRaw = [];
+    private readonly RawCaptureWriter? _capture;
     private ISerialPortSession? _session;
     private string? _activePort;
     private decimal _sessionPeak;
     private decimal? _lastPeak;
     private DateTimeOffset _lastGood = DateTimeOffset.MinValue;
     private string? _lastError;
+    private string? _lastRawBody;
     private int _consecutiveFailures;
 
     public TelePostLp100Provider(
@@ -30,17 +37,20 @@ public sealed class TelePostLp100Provider : IRfMonitor
         bool autoDetect,
         int baudRate,
         decimal txThresholdWatts = 0.05m,
-        Func<string, int, ISerialPortSession>? portFactory = null)
+        Func<string, int, ISerialPortSession>? portFactory = null,
+        RawCaptureWriter? captureWriter = null)
     {
         _preferredPort = string.IsNullOrWhiteSpace(preferredPort) ? null : preferredPort.Trim();
         _autoDetect = autoDetect;
         _baudRate = baudRate;
         _txThresholdWatts = txThresholdWatts;
         _portFactory = portFactory ?? ((port, baud) => new SerialPortSession(port, baud));
+        _capture = captureWriter;
     }
 
     public bool IsConnected => _session?.IsOpen == true && _consecutiveFailures < 5;
     public string DeviceName => "TelePost LP-100A";
+    public string? CapturePath => _capture?.FilePath;
 
     public async Task<bool> ConnectAsync()
     {
@@ -94,11 +104,16 @@ public sealed class TelePostLp100Provider : IRfMonitor
                 return BuildDisconnected("Waiting for LP-100A poll response. Keep the meter on the Watts screen.");
             }
 
-            var frame = frames[^1];
+            foreach (var f in frames)
+            {
+                RememberRaw(f.RawBody);
+                _capture?.Write(f.RawBody, f.ForwardPowerWatts, f.Swr);
+            }
+
             _consecutiveFailures = 0;
             _lastError = null;
             _lastGood = DateTimeOffset.UtcNow;
-            return BuildFromFrame(frame);
+            return BuildFromFrame(frames[^1]);
         }
         catch (Exception ex)
         {
@@ -125,7 +140,17 @@ public sealed class TelePostLp100Provider : IRfMonitor
         if (frames.Count == 0)
             return BuildDisconnected("Port opened but no LP-100A frame was received. Confirm COM port and Watts screen.");
 
+        foreach (var f in frames)
+            RememberRaw(f.RawBody);
         return BuildFromFrame(frames[^1]);
+    }
+
+    private void RememberRaw(string body)
+    {
+        _lastRawBody = body;
+        _recentRaw.Add(body);
+        if (_recentRaw.Count > MaxRecentRawFrames)
+            _recentRaw.RemoveRange(0, _recentRaw.Count - MaxRecentRawFrames);
     }
 
     private async Task EnsureConnectedAsync(CancellationToken cancellationToken)
@@ -182,6 +207,8 @@ public sealed class TelePostLp100Provider : IRfMonitor
 
     private RfTelemetry BuildFromFrame(Lp100Frame frame)
     {
+        // Display snapshot — not an RF-envelope sample. Peak Hold on the meter
+        // is required for trustworthy PACTOR peaks; we never send F/A/M.
         var transmitting = frame.ForwardPowerWatts > _txThresholdWatts;
         if (transmitting)
         {
@@ -199,7 +226,9 @@ public sealed class TelePostLp100Provider : IRfMonitor
         var rl = RfDerivedMetrics.ReturnLossDb(frame.Swr);
         var r = RfDerivedMetrics.ResistanceOhms(frame.ImpedanceOhms, frame.PhaseDegrees);
         var x = RfDerivedMetrics.ReactanceOhms(frame.ImpedanceOhms, frame.PhaseDegrees);
+        var meterMode = RfDerivedMetrics.MeterModeText(frame.MeterMode);
         var now = DateTimeOffset.UtcNow;
+        var swrFloor = RfDerivedMetrics.IsSwrAtResolutionFloor(frame.Swr);
 
         return new RfTelemetry
         {
@@ -216,7 +245,10 @@ public sealed class TelePostLp100Provider : IRfMonitor
             PeakForwardPowerWatts = transmitting ? _sessionPeak : null,
             LastPeakForwardPowerWatts = _lastPeak,
             ReflectedPowerWatts = transmitting ? reflected : 0m,
+            ReflectedPowerWattsCalculated = transmitting ? reflected : 0m,
+            ReflectedPowerSource = RfReflectedPowerSources.Calculated,
             Swr = transmitting ? frame.Swr : null,
+            SwrAtResolutionFloor = transmitting && swrFloor,
             ReturnLossDb = transmitting ? rl : null,
             Dbm = transmitting ? frame.Dbm : null,
             ImpedanceOhms = transmitting ? frame.ImpedanceOhms : null,
@@ -224,11 +256,16 @@ public sealed class TelePostLp100Provider : IRfMonitor
             ResistanceOhms = transmitting ? r : null,
             ReactanceOhms = transmitting ? x : null,
             PowerRange = RfDerivedMetrics.PowerRangeText(frame.PowerRange),
-            MeterMode = RfDerivedMetrics.MeterModeText(frame.MeterMode),
+            MeterMode = meterMode,
+            MeterModeHint = meterMode is "Peak" or "Tune"
+                ? null
+                : RfDerivedMetrics.PeakHoldHint,
             MeterAlarmSetpoint = RfDerivedMetrics.AlarmSetpointText(frame.AlarmIndex),
             Callsign = string.IsNullOrWhiteSpace(frame.Callsign) ? null : frame.Callsign,
             ComPort = _activePort,
             BaudRate = _baudRate,
+            LastRawFrameBody = frame.RawBody,
+            RecentRawFrameBodies = _recentRaw.ToList(),
             Events = _events.TakeLast(20).ToList()
         };
     }
@@ -247,6 +284,10 @@ public sealed class TelePostLp100Provider : IRfMonitor
         ComPort = _activePort ?? _preferredPort,
         BaudRate = _baudRate,
         LastPeakForwardPowerWatts = _lastPeak,
+        LastRawFrameBody = _lastRawBody,
+        RecentRawFrameBodies = _recentRaw.ToList(),
+        MeterModeHint = RfDerivedMetrics.PeakHoldHint,
+        ReflectedPowerSource = RfReflectedPowerSources.Calculated,
         Events = _events.TakeLast(20).ToList()
     };
 

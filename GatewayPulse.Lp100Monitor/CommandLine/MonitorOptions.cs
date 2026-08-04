@@ -16,10 +16,11 @@ public sealed class MonitorOptions
     public int BaudRate { get; init; } = 115200;
     public string OutputPath { get; init; } = "RfTelemetry.json";
     public string LogsPath { get; init; } = "logs";
-    public int IntervalMs { get; init; } = 250;
+    public int IntervalMs { get; init; } = 80;
     public int IdleIntervalMs { get; init; } = 1000;
     public bool Once { get; init; }
     public bool ForceDemo { get; init; }
+    public bool CaptureRaw { get; init; }
     public string? ConfigPath { get; init; }
 
     public static MonitorOptions Parse(string[] args)
@@ -47,9 +48,9 @@ public sealed class MonitorOptions
         if (map.TryGetValue("--baud", out var baudText) && int.TryParse(baudText, out var parsedBaud))
             baud = parsedBaud;
 
-        var interval = 250;
+        var interval = 80;
         if (map.TryGetValue("--interval-ms", out var intervalText) && int.TryParse(intervalText, out var parsedInterval))
-            interval = Math.Clamp(parsedInterval, 100, 5000);
+            interval = Math.Clamp(parsedInterval, 50, 5000);
 
         var idle = 1000;
         if (map.TryGetValue("--idle-interval-ms", out var idleText) && int.TryParse(idleText, out var parsedIdle))
@@ -75,6 +76,7 @@ public sealed class MonitorOptions
             IdleIntervalMs = idle,
             Once = map.ContainsKey("--once"),
             ForceDemo = map.ContainsKey("--force-demo"),
+            CaptureRaw = map.ContainsKey("--capture"),
             ConfigPath = map.TryGetValue("--config", out var config) ? config : null
         };
     }
@@ -85,6 +87,7 @@ public sealed class MonitorOptions
 
         Serial (firmware ≥ 1.2.0.0): 115200 8N1, poll ASCII 'P', response ';Power,Z,Phase,...'
         Only the documented poll command is sent. A/M/F are never used.
+        Values are display snapshots (not RF-envelope samples). Prefer Peak Hold for PACTOR.
 
         --port COMx              Preferred COM port
         --auto-detect            Try available ports (default on)
@@ -92,8 +95,9 @@ public sealed class MonitorOptions
         --baud 115200            Baud rate (115200 default; older firmware may need 38400/19200)
         --output path            Atomic JSON telemetry path
         --logs path              Log directory
-        --interval-ms 250        Poll interval while transmitting
-        --idle-interval-ms 1000  Poll interval while idle
+        --interval-ms 80         Poll interval while transmitting (min 50; ~50–80 for PACTOR)
+        --idle-interval-ms 1000  Poll interval while idle (min 250)
+        --capture                Record timestamped raw P responses under --logs (bounded)
         --once                   Single sample then exit
         --test                   Open port, poll once, write result, exit
         --mock                   Simulated telemetry (dev only)

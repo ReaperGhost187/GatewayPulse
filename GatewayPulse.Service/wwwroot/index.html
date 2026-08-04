@@ -619,6 +619,7 @@
       <div class="subtitle" id="subtitle">Local read-only gateway monitor</div>
       <nav class="nav">
         <a class="active" href="/">Dashboard</a>
+        <a href="/rf-analysis.html">RF Analysis</a>
         <a href="/network-map.html">Network Map</a>
         <a href="/settings.html">Settings</a>
       </nav>
@@ -736,6 +737,10 @@
         <summary>Transmission History</summary>
         <div class="battery-metrics-body">
           <div id="rf_transmission_history" aria-live="polite" aria-label="RF transmission history"></div>
+          <p class="muted" style="margin-top:10px">
+            <a href="/rf-analysis.html" style="color:var(--blue)">Open RF Analysis</a>
+            for synchronized timelines (power, SWR, frequency, battery).
+          </p>
         </div>
       </details>
     </section>
@@ -803,7 +808,7 @@
 </div>
 
 <script src="/power-system.js?v=1.2.8"></script>
-<script src="/rf-system.js?v=1.1.0"></script>
+<script src="/rf-system.js?v=1.2.8"></script>
 <script src="/dashboard-preferences.js?v=1.0.1"></script>
 <script>
 let refreshInFlight = false;

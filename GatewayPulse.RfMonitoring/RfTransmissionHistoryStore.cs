@@ -40,6 +40,59 @@ public sealed class RfTransmissionHistoryStore
         }
     }
 
+    /// <summary>
+    /// All completed sessions eligible for SWR-by-frequency analysis (valid freq + valid SWR).
+    /// Newest first. Does not include in-progress sessions.
+    /// </summary>
+    public IReadOnlyList<RfTransmissionEvent> QuerySwrByFrequency(
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        string? source = null,
+        string? confidence = null,
+        decimal? minForwardWatts = null,
+        decimal? freqMinKhz = null,
+        decimal? freqMaxKhz = null)
+    {
+        lock (_gate)
+        {
+            EnsureLoaded_NoLock();
+            IEnumerable<RfTransmissionEvent> q = _events.Where(e =>
+                !e.InProgress &&
+                e.StartFrequencyKhz is > 0 &&
+                e.MaxSwr is > 0 &&
+                e.AverageSwr is > 0);
+
+            if (from is not null)
+                q = q.Where(e => e.StartTime >= from.Value);
+            if (to is not null)
+                q = q.Where(e => e.StartTime <= to.Value);
+
+            if (!string.IsNullOrWhiteSpace(source) &&
+                !string.Equals(source, "all", StringComparison.OrdinalIgnoreCase))
+            {
+                q = q.Where(e => string.Equals(e.FrequencySource, source, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(confidence) &&
+                !string.Equals(confidence, "all", StringComparison.OrdinalIgnoreCase))
+            {
+                var allowed = confidence
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                q = q.Where(e => allowed.Contains(e.FrequencyConfidence));
+            }
+
+            if (minForwardWatts is > 0)
+                q = q.Where(e => e.PeakForwardPowerWatts >= minForwardWatts.Value);
+            if (freqMinKhz is not null)
+                q = q.Where(e => e.StartFrequencyKhz >= freqMinKhz.Value);
+            if (freqMaxKhz is not null)
+                q = q.Where(e => e.StartFrequencyKhz <= freqMaxKhz.Value);
+
+            return q.ToList();
+        }
+    }
+
     private void EnsureLoaded_NoLock()
     {
         if (_loaded)

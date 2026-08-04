@@ -72,6 +72,20 @@ builder.Services.AddSingleton<IRfMonitor>(
 builder.Services.AddSingleton(new RfHistoryStore(
     rfHistoryPath,
     minSampleInterval: TimeSpan.FromSeconds(Math.Max(2, rfHistorySampleSeconds))));
+var configuredRfAnalysisPath = builder.Configuration["RfMonitoring:AnalysisPath"];
+var rfAnalysisPath = string.IsNullOrWhiteSpace(configuredRfAnalysisPath)
+    ? Path.Combine(Path.GetDirectoryName(rfTelemetryPath) ?? builder.Environment.ContentRootPath, "RfAnalysis.json")
+    : (Path.IsPathRooted(configuredRfAnalysisPath)
+        ? configuredRfAnalysisPath
+        : Path.Combine(builder.Environment.ContentRootPath, configuredRfAnalysisPath));
+builder.Services.AddSingleton(new RfAnalysisStore(rfAnalysisPath));
+var configuredSwrByFreqPath = builder.Configuration["RfMonitoring:SwrByFrequencyPath"];
+var swrByFreqPath = string.IsNullOrWhiteSpace(configuredSwrByFreqPath)
+    ? Path.Combine(Path.GetDirectoryName(rfTelemetryPath) ?? builder.Environment.ContentRootPath, "RfSwrByFrequency.json")
+    : (Path.IsPathRooted(configuredSwrByFreqPath)
+        ? configuredSwrByFreqPath
+        : Path.Combine(builder.Environment.ContentRootPath, configuredSwrByFreqPath));
+builder.Services.AddSingleton(new RfSwrByFrequencyStore(swrByFreqPath));
 var configuredTxHistoryPath = builder.Configuration["RfMonitoring:TransmissionHistoryPath"];
 var txHistoryPath = string.IsNullOrWhiteSpace(configuredTxHistoryPath)
     ? Path.Combine(Path.GetDirectoryName(rfTelemetryPath) ?? builder.Environment.ContentRootPath, "RfTransmissionHistory.json")
@@ -82,7 +96,10 @@ builder.Services.AddSingleton(new RfTransmissionHistoryStore(txHistoryPath));
 builder.Services.AddHostedService(provider =>
     new RfHistoryCollector(
         provider.GetRequiredService<IRfMonitor>(),
+        provider.GetRequiredService<IPowerMonitor>(),
+        provider.GetRequiredService<FrequencySnapshotProvider>(),
         provider.GetRequiredService<RfHistoryStore>(),
+        provider.GetRequiredService<RfAnalysisStore>(),
         provider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Lp100MonitorOptions>>(),
         provider.GetRequiredService<ILogger<RfHistoryCollector>>()));
 
@@ -90,6 +107,7 @@ builder.Services.AddSingleton<GatewayPulseService>();
 builder.Services.AddSingleton<PushoverService>();
 builder.Services.AddVictronMonitorSupervision(builder.Configuration);
 builder.Services.AddLp100MonitorSupervision(builder.Configuration);
+builder.Services.AddHostedService<RfAnalysisEventBridge>();
 
 var app = builder.Build();
 var appsettingsPath = Path.Combine(builder.Environment.ContentRootPath, "appsettings.json");
@@ -177,6 +195,77 @@ app.MapGet("/api/rf/history", (
     if (!RfHistoryStore.TryParseRange(string.IsNullOrWhiteSpace(range) ? "1h" : range, out _))
         return Results.BadRequest(new { error = "Unsupported range. Use 15m, 1h, 6h, 24h, or 7d." });
     return Results.Json(rfHistoryStore.Query(parsedMetric, range ?? "1h"));
+});
+
+app.MapGet("/api/rf/analysis", (
+    RfAnalysisStore analysisStore,
+    RfTransmissionHistoryStore txHistoryStore,
+    string? range,
+    DateTimeOffset? from,
+    DateTimeOffset? to,
+    string? transmissionId) =>
+{
+    DateTimeOffset? resolvedFrom = from;
+    DateTimeOffset? resolvedTo = to;
+    var resolvedRange = range;
+
+    if (string.Equals(range, "last", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(range, "lasttx", StringComparison.OrdinalIgnoreCase) ||
+        !string.IsNullOrWhiteSpace(transmissionId))
+    {
+        var list = txHistoryStore.List(50);
+        RfTransmissionEvent? tx = null;
+        if (!string.IsNullOrWhiteSpace(transmissionId))
+            tx = list.FirstOrDefault(t => string.Equals(t.Id, transmissionId, StringComparison.OrdinalIgnoreCase));
+        tx ??= list.FirstOrDefault(t => !t.InProgress) ?? list.FirstOrDefault();
+        if (tx is not null)
+        {
+            resolvedFrom = tx.StartTime.AddSeconds(-5);
+            resolvedTo = (tx.EndTime ?? DateTimeOffset.UtcNow).AddSeconds(5);
+            resolvedRange = "last";
+            transmissionId = tx.Id;
+        }
+    }
+
+    return Results.Json(analysisStore.Query(resolvedFrom, resolvedTo, resolvedRange, transmissionId));
+});
+
+app.MapGet("/api/rf/analysis/events", (
+    RfAnalysisStore analysisStore,
+    string? range,
+    DateTimeOffset? from,
+    DateTimeOffset? to,
+    int? take) =>
+    Results.Json(analysisStore.QueryEvents(from, to, range, take ?? 200)));
+
+app.MapGet("/api/rf/swr-by-frequency", (
+    RfSwrByFrequencyStore swrByFrequencyStore,
+    string? range,
+    DateTimeOffset? from,
+    DateTimeOffset? to,
+    string? source,
+    string? confidence,
+    long? minFrequencyHz,
+    long? maxFrequencyHz,
+    decimal? minForwardWatts,
+    string? metric,
+    bool? aggregate,
+    long? bucketHz,
+    string? compare) =>
+{
+    return Results.Json(swrByFrequencyStore.Query(
+        range: range,
+        from: from,
+        to: to,
+        source: source,
+        confidence: confidence,
+        minFrequencyHz: minFrequencyHz,
+        maxFrequencyHz: maxFrequencyHz,
+        minForwardWatts: minForwardWatts,
+        metric: metric ?? "max",
+        aggregate: aggregate == true,
+        bucketHz: bucketHz ?? RfSwrByFrequencyStore.DefaultBucketHz,
+        compare: compare));
 });
 
 app.MapPost("/api/rf/test-connection", async (
@@ -387,11 +476,16 @@ app.MapPost("/api/settings", async (AppSettingsEditModel settings) =>
 
     var lp = settings.Lp100Monitor ?? new Lp100MonitorOptions();
     if (lp.BaudRate <= 0) lp.BaudRate = 115200;
-    if (lp.IntervalMs < 100) lp.IntervalMs = 250;
+    if (lp.IntervalMs < 50) lp.IntervalMs = 80;
     if (lp.IdleIntervalMs < 250) lp.IdleIntervalMs = 1000;
     if (lp.RestartDelaySeconds < 1) lp.RestartDelaySeconds = 10;
     if (lp.TxThresholdWatts <= 0) lp.TxThresholdWatts = 0.05m;
-    if (lp.TxEndDebounceMs < 100) lp.TxEndDebounceMs = 750;
+    if (lp.SwrMinForwardWatts <= 0) lp.SwrMinForwardWatts = 0.5m;
+    // Prefer SessionCoalesceMs; keep TxEndDebounceMs as a synced legacy alias.
+    if (lp.SessionCoalesceMs < 100 && lp.TxEndDebounceMs >= 100)
+        lp.SessionCoalesceMs = lp.TxEndDebounceMs;
+    if (lp.SessionCoalesceMs < 100) lp.SessionCoalesceMs = 6000;
+    lp.TxEndDebounceMs = lp.SessionCoalesceMs;
     lp.Port = (lp.Port ?? "").Trim().ToUpperInvariant();
     lp.Alerts ??= new Lp100AlertOptions();
     root["Lp100Monitor"] = JsonSerializer.SerializeToNode(lp, new JsonSerializerOptions
@@ -404,6 +498,10 @@ app.MapPost("/api/settings", async (AppSettingsEditModel settings) =>
     rfMonitoring["TelemetryPath"] = string.IsNullOrWhiteSpace(lp.OutputPath) ? @"C:\PWM\RfTelemetry.json" : lp.OutputPath;
     if (rfMonitoring["HistoryPath"] is null)
         rfMonitoring["HistoryPath"] = @"C:\PWM\RfHistory.json";
+    if (rfMonitoring["AnalysisPath"] is null)
+        rfMonitoring["AnalysisPath"] = @"C:\PWM\RfAnalysis.json";
+    if (rfMonitoring["SwrByFrequencyPath"] is null)
+        rfMonitoring["SwrByFrequencyPath"] = @"C:\PWM\RfSwrByFrequency.json";
     if (rfMonitoring["TransmissionHistoryPath"] is null)
         rfMonitoring["TransmissionHistoryPath"] = @"C:\PWM\RfTransmissionHistory.json";
     if (rfMonitoring["StaleAfterSeconds"] is null)

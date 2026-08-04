@@ -204,6 +204,7 @@
     <div class="subtitle">Gateway identity, Pushover, Network Map, alerts, and dashboard preferences stored in appsettings.json</div>
     <nav class="nav">
       <a href="/">Dashboard</a>
+      <a href="/rf-analysis.html">RF Analysis</a>
       <a href="/network-map.html">Network Map</a>
       <a class="active" href="/settings.html">Settings</a>
     </nav>
@@ -334,9 +335,11 @@
       <section class="section">
         <div class="label">LP-100A / RF Monitoring</div>
         <p class="hint">
-          Read-only TelePost LP-100A serial monitoring (115200 8N1, poll command P only).
-          Keep the meter on its Watts screen. Enabling requires the LP-100A collector installed under Service\Lp100Monitor.
-          Restart the Gateway Pulse service after changing enable/port so the supervisor reloads.
+          Read-only TelePost LP-100A serial monitoring (115200 8N1, poll command P only — never F/A/M).
+          Keep the meter on its Watts screen. Serial values are display snapshots, not RF-envelope samples.
+          For PACTOR, set the LP-100A to Peak Hold (operator setting) and use Session coalesce ≈ 6000 ms so overs merge into one Transmission History session.
+          Restart the Gateway Pulse service after changing enable/port/poll timing so the supervisor reloads.
+          <a href="/rf-analysis.html" style="color:var(--blue)">Open RF Analysis</a>
         </p>
         <label class="setting">
           <span>
@@ -366,8 +369,20 @@
             <input id="lp100TxThreshold" type="text" autocomplete="off" inputmode="decimal" placeholder="0.05" />
           </label>
           <label class="field">
-            <span>TX end debounce (ms)</span>
-            <input id="lp100TxDebounce" type="text" autocomplete="off" inputmode="numeric" placeholder="750" />
+            <span>TX poll interval (ms)</span>
+            <input id="lp100Interval" type="text" autocomplete="off" inputmode="numeric" placeholder="80" title="While transmitting. ~50–80 ms for PACTOR display snapshots. Minimum 50." />
+          </label>
+          <label class="field">
+            <span>Idle poll interval (ms)</span>
+            <input id="lp100IdleInterval" type="text" autocomplete="off" inputmode="numeric" placeholder="1000" title="While not transmitting. ~500–1000 ms typical. Minimum 250." />
+          </label>
+          <label class="field">
+            <span>Session coalesce (ms)</span>
+            <input id="lp100SessionCoalesce" type="text" autocomplete="off" inputmode="numeric" placeholder="6000" title="PACTOR burst-gap timeout. Bursts closer than this merge into one RF session. Default 6000." />
+          </label>
+          <label class="field">
+            <span>SWR min forward (W)</span>
+            <input id="lp100SwrMinFwd" type="text" autocomplete="off" inputmode="decimal" placeholder="0.5" title="Ignore SWR/reflected below this forward power. Default 0.5 W (LP-100A low-power noise floor)." />
           </label>
           <label class="field">
             <span>SWR warning</span>
@@ -394,6 +409,20 @@
           <span><b>Enable RF history</b><span>Bounded forward/peak/reflected/SWR history for charts/API.</span></span>
           <input id="lp100History" type="checkbox" />
         </label>
+        <label class="setting">
+          <span>
+            <b>Capture raw P frames</b>
+            <span>Write timestamped raw LP-100A responses under C:\PWM\logs\lp100-raw-capture_*.log (bounded ~8 MiB). Also available via collector --capture.</span>
+          </span>
+          <input id="lp100Capture" type="checkbox" />
+        </label>
+        <details class="battery-metrics" id="lp100_raw_debug" style="margin-top:12px">
+          <summary>LP-100A raw frame diagnostics</summary>
+          <div class="battery-metrics-body">
+            <p class="hint">Last raw poll body(ies) from live telemetry for front-panel compare. Empty until the collector is connected.</p>
+            <pre id="lp100RawFrames" style="white-space:pre-wrap;word-break:break-all;color:var(--muted);font-size:12px;margin:0">—</pre>
+          </div>
+        </details>
         <label class="setting">
           <span><b>Enable RF Pushover alerts</b><span>High/critical SWR while transmitting, reflected power, disconnect, stale, recovery.</span></span>
           <input id="lp100AlertsEnabled" type="checkbox" />
@@ -596,8 +625,14 @@ function applyLp100ToForm(lp){
   document.getElementById('lp100Port').value = readValue(src, 'port', 'Port', '');
   document.getElementById('lp100Baud').value = String(readValue(src, 'baudRate', 'BaudRate', 115200));
   document.getElementById('lp100TxThreshold').value = String(readValue(src, 'txThresholdWatts', 'TxThresholdWatts', 0.05));
-  document.getElementById('lp100TxDebounce').value = String(readValue(src, 'txEndDebounceMs', 'TxEndDebounceMs', 750));
+  document.getElementById('lp100Interval').value = String(readValue(src, 'intervalMs', 'IntervalMs', 80));
+  document.getElementById('lp100IdleInterval').value = String(readValue(src, 'idleIntervalMs', 'IdleIntervalMs', 1000));
+  const coalesce = readValue(src, 'sessionCoalesceMs', 'SessionCoalesceMs', null);
+  const legacyDebounce = readValue(src, 'txEndDebounceMs', 'TxEndDebounceMs', 6000);
+  document.getElementById('lp100SessionCoalesce').value = String(coalesce != null && coalesce !== '' ? coalesce : legacyDebounce);
+  document.getElementById('lp100SwrMinFwd').value = String(readValue(src, 'swrMinForwardWatts', 'SwrMinForwardWatts', 0.5));
   document.getElementById('lp100History').checked = readValue(src, 'historyEnabled', 'HistoryEnabled', true) !== false;
+  document.getElementById('lp100Capture').checked = !!readValue(src, 'captureRawFrames', 'CaptureRawFrames', false);
   const alerts = readValue(src, 'alerts', 'Alerts', {}) || {};
   document.getElementById('lp100AlertsEnabled').checked = !!readValue(alerts, 'enabled', 'Enabled', false);
   document.getElementById('lp100SwrWarn').value = String(readValue(alerts, 'swrWarning', 'SwrWarning', 2));
@@ -617,14 +652,17 @@ function readLp100FromForm(){
     AutoDetect: document.getElementById('lp100AutoDetect').checked,
     BaudRate: Number(document.getElementById('lp100Baud').value) || 115200,
     TxThresholdWatts: Number(document.getElementById('lp100TxThreshold').value) || 0.05,
-    TxEndDebounceMs: Number(document.getElementById('lp100TxDebounce').value) || 750,
+    SessionCoalesceMs: Number(document.getElementById('lp100SessionCoalesce').value) || 6000,
+    TxEndDebounceMs: Number(document.getElementById('lp100SessionCoalesce').value) || 6000,
+    SwrMinForwardWatts: Number(document.getElementById('lp100SwrMinFwd').value) || 0.5,
     ExecutablePath: 'Lp100Monitor\\GatewayPulse.Lp100Monitor.exe',
     OutputPath: 'C:\\PWM\\RfTelemetry.json',
     LogsPath: 'C:\\PWM\\logs',
-    IntervalMs: 250,
-    IdleIntervalMs: 1000,
+    IntervalMs: Number(document.getElementById('lp100Interval').value) || 80,
+    IdleIntervalMs: Number(document.getElementById('lp100IdleInterval').value) || 1000,
     RestartDelaySeconds: 10,
     HistoryEnabled: document.getElementById('lp100History').checked,
+    CaptureRawFrames: document.getElementById('lp100Capture').checked,
     Alerts: {
       Enabled: document.getElementById('lp100AlertsEnabled').checked,
       HighSwr: true,
@@ -791,6 +829,28 @@ testButton.addEventListener('click', async () => {
   }
 });
 
+async function refreshLp100RawDiagnostics(){
+  const pre = document.getElementById('lp100RawFrames');
+  if(!pre) return;
+  try{
+    const response = await fetch('/api/rf', { cache:'no-store' });
+    if(!response.ok) throw new Error('HTTP ' + response.status);
+    const payload = await response.json();
+    const rf = payload.telemetry || payload;
+    const recent = rf.recentRawFrameBodies || rf.RecentRawFrameBodies || [];
+    const last = rf.lastRawFrameBody || rf.LastRawFrameBody;
+    if(Array.isArray(recent) && recent.length){
+      pre.textContent = recent.map((b,i) => `[${i+1}] ${b}`).join('\n');
+    }else if(last){
+      pre.textContent = last;
+    }else{
+      pre.textContent = 'No raw frames yet (collector offline or idle).';
+    }
+  }catch{
+    pre.textContent = 'Unable to load raw frame diagnostics.';
+  }
+}
+
 document.getElementById('lp100Test').addEventListener('click', async () => {
   const btn = document.getElementById('lp100Test');
   const msg = document.getElementById('lp100TestMessage');
@@ -837,7 +897,9 @@ document.getElementById('lp100Test').addEventListener('click', async () => {
     const t = result.telemetry || {};
     msg.textContent = 'Connected.';
     msg.className = 'message good';
-    hint.textContent = `OK on ${t.comPort || 'COM'} @ ${t.baudRate || 115200}. Forward ${t.forwardPowerWatts ?? 0} W, SWR ${t.swr ?? '—'}.`;
+    const swrText = (t.swrAtResolutionFloor || Number(t.swr) === 1) ? '≤1.00' : (t.swr ?? '—');
+    hint.textContent = `OK on ${t.comPort || 'COM'} @ ${t.baudRate || 115200}. Forward ${t.forwardPowerWatts ?? 0} W, SWR ${swrText}, mode ${t.meterMode || '—'}.`;
+    await refreshLp100RawDiagnostics();
   }
   catch(error){
     msg.textContent = error.message || 'Test failed.';
@@ -850,7 +912,8 @@ document.getElementById('lp100Test').addEventListener('click', async () => {
 });
 
 applyPreferencesToForm(DashboardPreferences.defaults());
-loadSettings();
+loadSettings().then(() => refreshLp100RawDiagnostics());
+setInterval(refreshLp100RawDiagnostics, 10000);
 </script>
 </body>
 </html>

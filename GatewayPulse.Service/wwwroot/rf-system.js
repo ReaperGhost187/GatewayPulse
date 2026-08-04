@@ -18,9 +18,10 @@
     return n.toFixed(2) + ' W';
   }
 
-  function fmtSwr(swr) {
+  function fmtSwr(swr, atFloor) {
     const n = num(swr);
     if (n === null) return '—';
+    if (atFloor || n <= 1.00) return '≤1.00';
     return n.toFixed(2);
   }
 
@@ -60,11 +61,29 @@
     const peak = rf && rf.transmitting
       ? rf.peakForwardPowerWatts
       : (rf && rf.lastPeakForwardPowerWatts);
+    const reflected = rf && (rf.reflectedPowerWattsCalculated != null
+      ? rf.reflectedPowerWattsCalculated
+      : rf.reflectedPowerWatts);
     return [
       { key: 'forward', label: 'Forward Power', value: fmtPower(rf && rf.forwardPowerWatts) },
-      { key: 'reflected', label: 'Reflected Power', value: fmtPower(rf && rf.reflectedPowerWatts) },
-      { key: 'swr', label: 'SWR', value: fmtSwr(rf && rf.swr) },
-      { key: 'peak', label: 'Peak Power', value: fmtPower(peak), hint: rf && !rf.transmitting && rf.lastPeakForwardPowerWatts != null ? 'last TX' : null }
+      {
+        key: 'reflected',
+        label: 'Reflected (calc)',
+        value: fmtPower(reflected),
+        hint: 'derived from SWR'
+      },
+      {
+        key: 'swr',
+        label: 'SWR',
+        value: fmtSwr(rf && rf.swr, rf && rf.swrAtResolutionFloor),
+        hint: rf && (rf.swrAtResolutionFloor || num(rf.swr) === 1) ? 'resolution floor' : null
+      },
+      {
+        key: 'peak',
+        label: 'Peak Power',
+        value: fmtPower(peak),
+        hint: rf && !rf.transmitting && rf.lastPeakForwardPowerWatts != null ? 'last TX' : null
+      }
     ];
   }
 
@@ -93,10 +112,12 @@
     add(show('reactance', true), 'Reactance X', rf && rf.reactanceOhms != null ? fmtOhms(rf.reactanceOhms) : null);
     add(show('powerRange', true), 'Power range', rf && rf.powerRange);
     add(show('meterMode', true), 'Meter mode', rf && rf.meterMode);
+    if (rf && rf.meterModeHint) rows.push({ label: 'Meter hint', value: rf.meterModeHint });
     add(show('connectionState', true), 'Connection', rf && (rf.connectionState || (rf.connected ? 'Connected' : 'Disconnected')));
     add(show('protocolStatus', true), 'Protocol', rf && rf.protocolStatus);
     add(show('lastUpdate', true), 'Last update', rf && rf.lastUpdate ? new Date(rf.lastUpdate).toLocaleString() : null);
     if (rf && rf.comPort) rows.push({ label: 'COM port', value: rf.comPort + (rf.baudRate ? ' @ ' + rf.baudRate : '') });
+    if (rf && rf.lastRawFrameBody) rows.push({ label: 'Last raw frame', value: rf.lastRawFrameBody });
     if (rf && rf.error) rows.push({ label: 'Status detail', value: rf.error });
     return rows;
   }
@@ -130,6 +151,8 @@
     const avgSwr = tx.averageSwr ?? tx.AverageSwr;
     const maxRef = tx.maxReflectedPowerWatts ?? tx.MaxReflectedPowerWatts;
     const duration = tx.durationSeconds ?? tx.DurationSeconds;
+    const bursts = tx.burstCount ?? tx.BurstCount ?? 1;
+    const swrFloor = !!(tx.swrAtResolutionFloor || tx.SwrAtResolutionFloor);
 
     let freqLine = `Frequency: ${fmtFreq(startFreq)}`;
     if (changed && endFreq != null) freqLine += ` → ${fmtFreq(endFreq)} (changed during TX)`;
@@ -138,11 +161,12 @@
     freqLine += ` · Confidence: ${confidence}`;
 
     const when = start ? new Date(start).toLocaleString() : '—';
-    const title = inProgress ? 'TX in progress' : 'RF transmission';
+    const title = inProgress ? 'RF session in progress' : 'RF session';
+    const burstLabel = bursts > 1 ? `${bursts} bursts` : '1 burst';
     row.innerHTML =
-      `<div><b>${title}</b> · ${when}</div>` +
+      `<div><b>${title}</b> · ${when} · ${burstLabel}</div>` +
       `<div class="muted">${freqLine}</div>` +
-      `<div>Peak ${fmtPower(peak)} · Max refl ${fmtPower(maxRef)} · Max SWR ${fmtSwr(maxSwr)} · Avg SWR ${fmtSwr(avgSwr)} · ${fmtDuration(duration)}</div>`;
+      `<div>Peak ${fmtPower(peak)} · Max refl (calc) ${fmtPower(maxRef)} · Max SWR ${fmtSwr(maxSwr, swrFloor)} · Avg SWR ${fmtSwr(avgSwr, swrFloor && num(avgSwr) <= 1)} · ${fmtDuration(duration)}</div>`;
     return row;
   }
 

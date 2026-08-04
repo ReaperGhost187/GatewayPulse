@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Gateway Pulse — RF Analysis</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      color-scheme:dark;
+      --bg:#000206;
+      --panel:#050a10;
+      --panel2:#02050a;
+      --line:#142033;
+      --line2:#20324a;
+      --text:#eef4fb;
+      --muted:#8ca2b8;
+      --dim:#596b7e;
+      --blue:#4fc3f7;
+      --good:#32d583;
+      --bad:#ff5d73;
+      --warn:#ffb84d;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;padding:18px;
+      background:
+        radial-gradient(circle at top left,rgba(79,195,247,.12),transparent 34%),
+        radial-gradient(circle at top right,rgba(50,213,131,.05),transparent 32%),
+        var(--bg);
+      color:var(--text);
+      font-family:"Segoe UI",system-ui,Arial,sans-serif;
+    }
+    .shell{max-width:1420px;margin:0 auto}
+    .topbar{
+      border:1px solid var(--line);border-radius:22px;
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
+      padding:22px;display:flex;justify-content:space-between;gap:18px;align-items:center;
+      box-shadow:0 18px 50px rgba(0,0,0,.35);
+    }
+    .title{font-size:34px;font-weight:950;letter-spacing:.2px}
+    .subtitle{margin-top:6px;color:var(--muted);font-size:15px}
+    .nav{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+    .nav a{
+      color:var(--text);text-decoration:none;border:1px solid var(--line2);
+      border-radius:999px;padding:8px 13px;font-size:13px;font-weight:850;
+      background:rgba(255,255,255,.025);
+    }
+    .nav a.active{border-color:rgba(79,195,247,.75);color:var(--blue)}
+    .grid{margin-top:16px;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px}
+    .card{
+      border:1px solid var(--line);border-radius:20px;
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
+      padding:18px;box-shadow:0 14px 36px rgba(0,0,0,.24);
+    }
+    .label{
+      color:var(--muted);font-size:12px;text-transform:uppercase;
+      letter-spacing:.14em;font-weight:850;margin-bottom:11px;
+    }
+    .muted{color:var(--muted)}
+    .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+    select,button,input{
+      background:#02050a;color:var(--text);border:1px solid var(--line2);
+      border-radius:12px;padding:8px 12px;font:inherit;
+    }
+    button{cursor:pointer;font-weight:800}
+    button:hover{border-color:rgba(79,195,247,.65)}
+    .trace-toggles{display:flex;flex-wrap:wrap;gap:8px 14px;margin:10px 0 14px}
+    .trace-toggle{
+      display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:var(--muted);
+    }
+    .trace-toggle input{accent-color:var(--blue)}
+    .swatch{width:10px;height:10px;border-radius:3px;display:inline-block}
+    .chart-shell{
+      width:100%;height:min(52vh,420px);border:1px solid var(--line2);
+      border-radius:16px;overflow:hidden;background:#02050a;
+    }
+    .chart-shell canvas{width:100%;height:100%;display:block}
+    .status{margin-top:10px;color:var(--muted);font-size:13px}
+    .event-list{display:flex;flex-direction:column;gap:8px;max-height:min(70vh,640px);overflow:auto}
+    .event-row{
+      text-align:left;display:flex;gap:10px;align-items:flex-start;
+      width:100%;padding:10px 12px;border-radius:14px;
+    }
+    .event-row .dot{width:9px;height:9px;border-radius:50%;margin-top:5px;flex:0 0 auto}
+    #telemetry_at{margin-top:14px;display:grid;gap:6px;font-size:14px}
+    #custom_range{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .hint{margin:0 0 12px;color:var(--muted);font-size:13px;line-height:1.45}
+    .section-stack{margin-top:16px;display:grid;gap:16px}
+    .filters{
+      display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:10px;margin-bottom:12px;
+    }
+    .filters label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);font-weight:750}
+    .filters input,.filters select{width:100%}
+    .check-row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:4px 0 12px}
+    .check-row label{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:750;color:var(--muted)}
+    .swr-hover{
+      margin-top:10px;min-height:64px;border:1px solid var(--line2);border-radius:14px;
+      padding:10px 12px;background:rgba(0,0,0,.22);font-size:13px;line-height:1.45;
+    }
+    .compare-box{margin-top:12px;font-size:13px;color:var(--muted)}
+    .compare-box table{width:100%;border-collapse:collapse;margin-top:8px}
+    .compare-box th,.compare-box td{
+      border-bottom:1px solid var(--line);padding:6px 4px;text-align:left;font-variant-numeric:tabular-nums;
+    }
+    .compare-box .worse{color:var(--bad);font-weight:800}
+    @media (max-width:980px){
+      .grid{grid-template-columns:1fr}
+      .title{font-size:28px}
+      .chart-shell{height:320px}
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <div class="title">Gateway Pulse</div>
+        <div class="subtitle">RF Analysis — synchronized telemetry timeline for PACTOR / HF sessions</div>
+        <nav class="nav">
+          <a href="/">Dashboard</a>
+          <a class="active" href="/rf-analysis.html">RF Analysis</a>
+          <a href="/network-map.html">Network Map</a>
+          <a href="/settings.html">Settings</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <div class="label">Time series</div>
+        <p class="hint">
+          LP-100A values are display snapshots (not RF-envelope samples). Prefer Peak Hold on the meter for PACTOR.
+          Reflected power is calculated from SWR. SWR of exactly 1.00 is shown as ≤1.00 (meter resolution floor).
+        </p>
+        <div class="toolbar">
+          <label>
+            Range
+            <select id="range_select">
+              <option value="last">Last transmission</option>
+              <option value="30s">Last 30s</option>
+              <option value="5m" selected>Last 5m</option>
+              <option value="1h">Last 1h</option>
+              <option value="24h">Last 24h</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <div id="custom_range" hidden>
+            <input id="custom_from" type="datetime-local" />
+            <input id="custom_to" type="datetime-local" />
+            <button type="button" id="custom_apply">Apply</button>
+          </div>
+          <button type="button" id="btn_reload">Reload</button>
+          <button type="button" id="btn_reset_zoom">Reset zoom</button>
+        </div>
+        <div class="trace-toggles" id="trace_toggles"></div>
+        <div class="chart-shell">
+          <canvas id="rf_chart" width="1100" height="400" aria-label="RF analysis chart"></canvas>
+        </div>
+        <div class="status" id="status_line">Loading…</div>
+        <div id="telemetry_at"></div>
+      </section>
+
+      <aside class="card">
+        <div class="label">Event markers</div>
+        <p class="hint">Click a marker to jump ±15s and inspect nearby telemetry.</p>
+        <div class="event-list" id="event_list"></div>
+      </aside>
+    </div>
+
+    <div class="section-stack">
+      <section class="card">
+        <div class="label">Historical SWR by Frequency</div>
+        <p class="hint">
+          Not a time-series. Each completed RF/PACTOR session with valid frequency and valid SWR is one observation.
+          Scatter points are not connected chronologically. Aggregation orders by frequency and shows sample count (n).
+        </p>
+        <div class="filters">
+          <label>
+            Date range
+            <select id="swr_range">
+              <option value="24h">Last 24 hours</option>
+              <option value="48h">48 hours</option>
+              <option value="5d">5 days</option>
+              <option value="7d">Last 7 days</option>
+              <option value="10d">10 days</option>
+              <option value="14d">14 days</option>
+              <option value="20d">20 days</option>
+              <option value="30d" selected>Last 30 days</option>
+              <option value="40d">40 days</option>
+              <option value="60d">60 days</option>
+              <option value="80d">80 days</option>
+              <option value="90d">90 days</option>
+              <option value="160d">160 days</option>
+              <option value="360d">360 days</option>
+              <option value="all">All history</option>
+              <option value="custom">Custom date range</option>
+            </select>
+          </label>
+          <label>
+            SWR metric
+            <select id="swr_metric">
+              <option value="max" selected>Maximum SWR</option>
+              <option value="average">Average SWR</option>
+            </select>
+          </label>
+          <label>
+            Winlink / source
+            <select id="swr_source">
+              <option value="all">All sources</option>
+            </select>
+          </label>
+          <label>
+            Frequency confidence
+            <select id="swr_confidence">
+              <option value="all">All</option>
+              <option value="live_recent" selected>Live + Recent</option>
+              <option value="Live">Live only</option>
+              <option value="Recent">Recent only</option>
+              <option value="Stale">Stale</option>
+            </select>
+          </label>
+          <label>
+            Min forward power (W)
+            <input id="swr_min_fwd" type="number" min="0" step="0.1" value="0.5" />
+          </label>
+          <label>
+            Min frequency (kHz)
+            <input id="swr_min_khz" type="number" min="0" step="1" placeholder="e.g. 3500" />
+          </label>
+          <label>
+            Max frequency (kHz)
+            <input id="swr_max_khz" type="number" min="0" step="1" placeholder="e.g. 30000" />
+          </label>
+          <label>
+            Compare periods
+            <select id="swr_compare">
+              <option value="">Off</option>
+              <option value="7d">Current 7d vs previous 7d</option>
+              <option value="30d">Current 30d vs previous 30d</option>
+            </select>
+          </label>
+        </div>
+        <div id="swr_custom_range" class="toolbar" hidden>
+          <input id="swr_from" type="datetime-local" />
+          <input id="swr_to" type="datetime-local" />
+          <button type="button" id="swr_custom_apply">Apply dates</button>
+        </div>
+        <div class="check-row">
+          <label><input id="swr_aggregate" type="checkbox" /> Aggregate by frequency (median / avg / worst + n)</label>
+          <button type="button" id="swr_reload">Reload</button>
+        </div>
+        <div class="chart-shell">
+          <canvas id="swr_freq_chart" width="1100" height="380" aria-label="Historical SWR by frequency chart"></canvas>
+        </div>
+        <div class="status" id="swr_status">Loading SWR-by-frequency history…</div>
+        <div class="swr-hover" id="swr_hover">Hover or click a point for session details.</div>
+        <div class="compare-box" id="swr_compare_box" hidden></div>
+      </section>
+    </div>
+  </div>
+  <script src="/rf-analysis.js?v=1.2.8"></script>
+</body>
+</html>

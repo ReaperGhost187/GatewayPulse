@@ -1,11 +1,15 @@
 namespace GatewayPulse.RfMonitoring;
 
 /// <summary>
-/// Metrics derived from LP-100A polled fields using standard RF formulas.
-/// Reflected power and return loss are not native serial fields.
+/// Metrics derived from LP-100A polled display fields using standard RF formulas.
+/// Reflected power and return loss are not native serial fields — label them calculated.
+/// Serial 'P' values are display snapshots, not RF-envelope samples.
 /// </summary>
 public static class RfDerivedMetrics
 {
+    public const string PeakHoldHint =
+        "Set LP-100A meter mode to Peak (Peak Hold) for PACTOR; Gateway Pulse does not send F/A/M.";
+
     public static decimal? ReflectedPowerWatts(decimal forwardWatts, decimal swr)
     {
         if (forwardWatts < 0m || swr < 1m)
@@ -15,6 +19,9 @@ public static class RfDerivedMetrics
         var gamma = (swr - 1m) / (swr + 1m);
         return forwardWatts * gamma * gamma;
     }
+
+    public static bool IsSwrAtResolutionFloor(decimal? swr) =>
+        swr is decimal s && s <= 1.00m;
 
     public static decimal? ReturnLossDb(decimal swr)
     {
