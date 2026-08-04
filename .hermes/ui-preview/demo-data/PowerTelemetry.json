@@ -1,0 +1,79 @@
+﻿{
+    "schemaVersion":  2,
+    "updatedAt":  "2026-08-04T23:01:39.9996177+00:00",
+    "connected":  true,
+    "provider":  "victron-multi-device",
+    "device":  "SmartShunt 300A",
+    "deviceId":  "AA:BB:CC:DD:EE:01",
+    "model":  "SmartShunt 300A",
+    "voltage":  13.57,
+    "current":  4.2,
+    "stateOfCharge":  82.5,
+    "outputEnabled":  true,
+    "alarm":  false,
+    "rssi":  -61,
+    "lastUpdate":  "2026-08-04T23:01:39.9996177+00:00",
+    "system":  {
+                   "status":  "Healthy",
+                   "voltage":  13.57,
+                   "current":  4.2,
+                   "watts":  56.994,
+                   "stateOfCharge":  82.5,
+                   "consumedAmpHours":  -12.4,
+                   "powerState":  "Charging",
+                   "outputEnabled":  true,
+                   "alarm":  false,
+                   "lastUpdate":  "2026-08-04T23:01:39.9996177+00:00"
+               },
+    "devices":  [
+                    {
+                        "type":  "SmartShunt",
+                        "provider":  "victron-smartshunt",
+                        "connected":  true,
+                        "stale":  false,
+                        "disconnectedBeyondTimeout":  false,
+                        "connectionState":  "Connected",
+                        "device":  "Victron SmartShunt 300A",
+                        "deviceId":  "AA:BB:CC:DD:EE:01",
+                        "model":  "SmartShunt 300A",
+                        "voltage":  13.57,
+                        "current":  4.2,
+                        "watts":  56.994,
+                        "stateOfCharge":  82.5,
+                        "consumedAmpHours":  -12.4,
+                        "alarm":  false,
+                        "rssi":  -61,
+                        "lastUpdate":  "2026-07-31T08:22:37+00:00"
+                    },
+                    {
+                        "type":  "BatteryProtect",
+                        "provider":  "victron-batteryprotect",
+                        "connected":  true,
+                        "stale":  false,
+                        "disconnectedBeyondTimeout":  false,
+                        "connectionState":  "Connected",
+                        "device":  "Victron Smart BatteryProtect 100A",
+                        "deviceId":  "D5:11:30:C1:55:16",
+                        "model":  "Smart BatteryProtect 100A",
+                        "voltage":  13.56,
+                        "outputEnabled":  true,
+                        "alarm":  false,
+                        "rssi":  -63,
+                        "lastUpdate":  "2026-07-31T08:22:37+00:00"
+                    }
+                ],
+    "events":  [
+                   {
+                       "timestamp":  "2026-07-31T08:06:06+00:00",
+                       "source":  "Power",
+                       "type":  "State",
+                       "detail":  "SmartShunt charging · 4.2 A"
+                   },
+                   {
+                       "timestamp":  "2026-07-31T08:05:46+00:00",
+                       "source":  "Power",
+                       "type":  "Status",
+                       "detail":  "BatteryProtect output enabled"
+                   }
+               ]
+}

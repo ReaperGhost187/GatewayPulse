@@ -1,46 +1,81 @@
-<img width="1166" height="1349" alt="Dashboard" src="https://github.com/user-attachments/assets/5b01d438-a199-4d2b-8b20-4adb9b1f43e5" />
-<img width="1336" height="1183" alt="settings" src="https://github.com/user-attachments/assets/f039ee19-d5af-45ea-b783-aa3bb1fedf48" />
-
 # Gateway Pulse v1.2 Multi-Device Power
 
-Gateway Pulse is a read-only Windows monitoring dashboard for RMS Relay and RMS Trimode gateways. This cloned development line preserves the proven Smart BatteryProtect integration and adds simultaneous Victron SmartShunt 300A Instant Readout support.
+Gateway Pulse is a read-only Windows monitoring dashboard for RMS Relay and RMS Trimode gateways. This line preserves Smart BatteryProtect integration and adds Victron SmartShunt Instant Readout plus TelePost LP-100A RF / SWR monitoring.
 
-The original working source remains untouched at:
+## Screenshots
 
-```text
-E:\GP-fromgpt\GatewayPulse_v1_Simple_Operator_Dashboard
-```
+### Dashboard — Station Power + RF Power
 
-This extension is developed at:
+![Dashboard overview with Station Power and RF Power / SWR cards](docs/images/dashboard-overview.png)
 
-```text
-E:\GP-fromgpt\GatewayPulse_v2_Multi_Device_Power
-```
+*Station overview with **Power System** (Victron) and **RF Power / SWR** (LP-100A) cards.*
+
+### RF Power — Transmission History
+
+![RF Power card with Transmission History expanded](docs/images/rf-power-transmission-history.png)
+
+*Live forward / reflected / SWR plus coalesced PACTOR and RF session history.*
+
+### RF Analysis — Timeline
+
+![RF Analysis synchronized time-series chart](docs/images/rf-analysis-timeline.png)
+
+*Synchronized LP-100A power, peak, reflected (calculated), and SWR timeline for a transmission.*
+
+### Historical SWR by Frequency
+
+![Historical SWR by Frequency scatter chart](docs/images/swr-by-frequency.png)
+
+*Per-session SWR observations plotted by frequency (not a time series).*
+
+### Settings — LP-100A / RF Monitoring
+
+![Settings page LP-100A and RF monitoring section](docs/images/settings-lp100a.png)
+
+*LP-100A serial monitoring, session coalesce, and RF history settings. Network Map launcher is in the same Settings page / nav.*
 
 ## Projects
 
-- `GatewayPulse.Core` ΓÇö gateway monitoring, memory/log parsing, and Pushover
-- `GatewayPulse.Service` ΓÇö Windows Service, Kestrel API, dashboard, and collector supervision
-- `GatewayPulse.Tray` ΓÇö notification-area client
-- `GatewayPulse.PowerMonitoring` ΓÇö provider-neutral schema-v2 telemetry, composition, atomic JSON, and file reader
-- `GatewayPulse.VictronMonitor` ΓÇö shared BLE scanner, BatteryProtect/SmartShunt decoders, multi-device manager, scan/device/mock modes
-- `GatewayPulse.VictronMonitor.Tests` ΓÇö protocol, provider, manager, configuration, API/file, supervisor, and dashboard-state tests
+- `GatewayPulse.Core` — gateway monitoring, memory/log parsing, and Pushover
+- `GatewayPulse.Service` — Windows Service, Kestrel API, dashboard, and collector supervision
+- `GatewayPulse.Tray` — notification-area client
+- `GatewayPulse.PowerMonitoring` — provider-neutral schema-v2 telemetry, composition, atomic JSON, and file reader
+- `GatewayPulse.VictronMonitor` — shared BLE scanner, BatteryProtect/SmartShunt decoders, multi-device manager, scan/device/mock modes
+- `GatewayPulse.RfMonitoring` — LP-100A telemetry, transmission history, RF analysis, and SWR-by-frequency stores
+- `GatewayPulse.Lp100Monitor` — TelePost LP-100A serial collector (live + mock)
+- `GatewayPulse.VictronMonitor.Tests` — protocol, provider, manager, configuration, API/file, supervisor, and dashboard-state tests
 
-## Power flow
+## Power + RF flow
 
 ```text
-one BLE watcher -> address-specific decoders -> VictronPowerManager
--> atomic C:\PWM\PowerTelemetry.json -> /api/power -> Power System card
+Victron BLE watcher -> VictronPowerManager
+  -> C:\PWM\PowerTelemetry.json -> /api/power -> Power System card
+
+LP-100A serial (or mock) -> RfTransmissionTracker / analysis stores
+  -> C:\PWM\Rf*.json -> /api/rf* -> RF Power card, RF Analysis, SWR-by-frequency
 ```
 
-Every device has its own address and ACL-protected key file. Key values are never accepted as multi-device process arguments or emitted in telemetry, APIs, logs, or dashboard output. SmartShunt remains disabled until its real address and key file are supplied; BatteryProtect continues independently.
+Every Victron device has its own address and ACL-protected key file. Key values are never accepted as multi-device process arguments or emitted in telemetry, APIs, logs, or dashboard output.
+
+## Local demo (isolated data)
+
+Demo Mode hosts the dashboard with Victron + LP-100A mocks and writes under `C:\PWM\demo` (does not wipe production `C:\PWM\*.json`):
+
+```powershell
+# Seed demo JSON once from repo preview data, then:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\.hermes\run-rf-ui-mockup.ps1
+```
+
+Open:
+
+- Dashboard: http://127.0.0.1:8080/
+- RF Analysis: http://127.0.0.1:8080/rf-analysis.html
+- Network Map: http://127.0.0.1:8080/network-map.html
+- Settings: http://127.0.0.1:8080/settings.html
 
 ## Canonical build
 
-Run from an ordinary PowerShell window on the development PC:
-
 ```powershell
-cd E:\GP-fromgpt\GatewayPulse_v2_Multi_Device_Power
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1
 ```
 
