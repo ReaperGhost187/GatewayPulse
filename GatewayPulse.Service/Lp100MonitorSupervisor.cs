@@ -17,8 +17,11 @@ public static class Lp100MonitorServiceCollectionExtensions
         services.Configure<RfMonitoringOptions>(configuration.GetSection("RfMonitoring"));
         services.Configure<DashboardOptions>(configuration.GetSection("Dashboard"));
         services.TryAddSingleton<ILp100MonitorProcessLauncher, Lp100MonitorProcessLauncher>();
+        services.AddSingleton<RadioCatFrequencyCache>();
+        services.AddSingleton<IcomCivSerialFrequencyClient>();
         services.AddSingleton<RadioCatFrequencyClient>();
         services.AddSingleton<FrequencySnapshotProvider>();
+        services.AddHostedService<RadioCatFrequencyPoller>();
         services.AddSingleton<RfTransmissionMonitor>();
         services.AddHostedService(provider => provider.GetRequiredService<RfTransmissionMonitor>());
         services.AddHostedService<Lp100MonitorSupervisor>();

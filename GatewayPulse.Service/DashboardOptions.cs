@@ -9,6 +9,12 @@ public sealed class DashboardOptions
     public bool DemoMode { get; set; }
 
     public int RefreshSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// How often the dashboard polls Trimode scanner/frequency (light path). Clamped 1–5s.
+    /// </summary>
+    public int LiveRadioSeconds { get; set; } = 2;
+
     public string Theme { get; set; } = "OLED";
 
     /// <summary>

@@ -31,8 +31,11 @@ public sealed class RfAnalysisEventBridge(
         {
             try
             {
-                var status = pulse.GetStatus();
-                var station = string.IsNullOrWhiteSpace(status.LastStation) ? null : status.LastStation.Trim();
+                // Peek only — never call GetStatus() here (full log parse would fight the dashboard).
+                var station = pulse.PeekLastStation()?.Trim();
+                if (string.IsNullOrWhiteSpace(station))
+                    station = null;
+
                 if (!string.Equals(station, _lastStation, StringComparison.OrdinalIgnoreCase))
                 {
                     if (!string.IsNullOrWhiteSpace(station))

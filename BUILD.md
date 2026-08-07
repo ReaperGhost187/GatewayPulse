@@ -29,6 +29,14 @@ Output:
 ```text
 Installer_Output\GatewayPulseSetup_v1.2.8.exe
 Installer_Output\GatewayPulseSetup_v1.2.8.sha256.txt
+Installer_Output\GatewayPulseSetup_v1.2.9.exe
+Installer_Output\GatewayPulseSetup_v1.2.9.sha256.txt
+Installer_Output\GatewayPulseSetup_v1.2.10.exe
+Installer_Output\GatewayPulseSetup_v1.2.10.sha256.txt
+Installer_Output\GatewayPulseSetup_v1.2.11.exe
+Installer_Output\GatewayPulseSetup_v1.2.11.sha256.txt
+Installer_Output\GatewayPulseSetup_v1.2.12.exe
+Installer_Output\GatewayPulseSetup_v1.2.12.sha256.txt
 ```
 
 The installer preserves existing appsettings content/ACLs, dashboard preferences, and current or legacy BatteryProtect configuration. SmartShunt configuration is optional and preserved on upgrades. It never copies or records a key value. It creates `C:\PWM` and `C:\PWM\logs`, protects enabled-device key files, installs one supervised collector, configures service recovery, and starts the Windows service.

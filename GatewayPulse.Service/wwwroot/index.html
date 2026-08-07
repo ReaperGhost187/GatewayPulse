@@ -320,20 +320,27 @@
     }
     .battery-metrics > summary::-webkit-details-marker{display:none}
     .battery-metrics > summary::after{
-      content:"▸";
-      color:var(--muted);
-      font-size:22px;
-      line-height:1;
-      width:1.75rem;
-      min-width:1.75rem;
-      height:1.75rem;
+      content:"";
+      width:2.25rem;
+      min-width:2.25rem;
+      height:2.25rem;
       display:inline-flex;
       align-items:center;
       justify-content:center;
       flex-shrink:0;
-      transition:transform .15s ease;
+      border:1px solid var(--line2);
+      border-radius:10px;
+      background:
+        rgba(255,255,255,.04)
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238ca2b8' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 6 15 12 9 18'/%3E%3C/svg%3E")
+        center/1.15rem 1.15rem no-repeat;
+      transition:transform .15s ease, border-color .15s ease, background-color .15s ease;
     }
-    .battery-metrics[open] > summary::after{transform:rotate(90deg)}
+    .battery-metrics[open] > summary::after{
+      transform:rotate(90deg);
+      border-color:rgba(79,195,247,.55);
+      background-color:rgba(79,195,247,.1);
+    }
     .battery-metrics-body{margin-top:14px}
     .battery-metrics-controls{
       display:flex;
@@ -355,15 +362,20 @@
     }
     .battery-metrics-controls select{
       appearance:none;
-      background:rgba(255,255,255,.03);
+      -webkit-appearance:none;
       color:var(--text);
       border:1px solid var(--line2);
       border-radius:999px;
-      padding:7px 12px;
+      padding:10px 2.6rem 10px 14px;
       font:inherit;
       font-size:13px;
       font-weight:750;
       min-width:170px;
+      min-height:44px;
+      background:
+        rgba(255,255,255,.03)
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238ca2b8' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")
+        right 0.85rem center/1.2rem 1.2rem no-repeat;
     }
     .range-pills{display:flex;gap:6px;flex-wrap:wrap}
     .range-pill{
@@ -554,6 +566,31 @@
       user-select:none;
     }
 
+    details:not(.battery-metrics) > summary{
+      list-style:none;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      min-height:44px;
+      padding:8px 0;
+    }
+    details:not(.battery-metrics) > summary::-webkit-details-marker{display:none}
+    details:not(.battery-metrics) > summary::after{
+      content:"";
+      width:2.25rem;
+      min-width:2.25rem;
+      height:2.25rem;
+      border:1px solid var(--line2);
+      border-radius:10px;
+      background:
+        rgba(255,255,255,.04)
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238ca2b8' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 6 15 12 9 18'/%3E%3C/svg%3E")
+        center/1.15rem 1.15rem no-repeat;
+      transition:transform .15s ease;
+    }
+    details:not(.battery-metrics)[open] > summary::after{transform:rotate(90deg)}
+
     .advanced-grid{
       margin-top:12px;
       display:grid;
@@ -597,15 +634,31 @@
       .power-devices{grid-template-columns:1fr}
       .battery-metrics-controls{align-items:stretch}
       .battery-metrics-controls select{width:100%}
-      .battery-metrics > summary{
-        min-height:52px;
+      .battery-metrics > summary,
+      details:not(.battery-metrics) > summary{
+        min-height:56px;
         font-size:13px;
+        padding:10px 0;
       }
-      .battery-metrics > summary::after{
-        font-size:28px;
-        width:2.25rem;
-        min-width:2.25rem;
-        height:2.25rem;
+      .battery-metrics > summary::after,
+      details:not(.battery-metrics) > summary::after{
+        width:3rem;
+        min-width:3rem;
+        height:3rem;
+        border-radius:12px;
+        background-size:1.45rem 1.45rem;
+      }
+      .battery-metrics-controls select{
+        min-height:52px;
+        font-size:15px;
+        padding:12px 3.1rem 12px 16px;
+        background-size:1.45rem 1.45rem;
+        background-position:right 1rem center;
+      }
+      .range-pill{
+        min-height:44px;
+        padding:10px 14px;
+        font-size:13px;
       }
     }
   </style>
@@ -807,12 +860,15 @@
   </div>
 </div>
 
-<script src="/power-system.js?v=1.2.8"></script>
-<script src="/rf-system.js?v=1.2.8"></script>
+<script src="/power-system.js?v=1.2.12"></script>
+<script src="/rf-system.js?v=1.2.12"></script>
 <script src="/dashboard-preferences.js?v=1.0.1"></script>
 <script>
 let refreshInFlight = false;
 let rfRefreshInFlight = false;
+let refreshSeconds = 5;
+let statusRefreshTimer = null;
+let liveRadioTimer = null;
 let batteryMetric = 'soc';
 let batteryRange = '24h';
 let batteryHistory = { metric:'soc', range:'24h', unit:'%', label:'State of charge', points:[] };
@@ -893,15 +949,11 @@ async function refreshCore(){
   setState('relay', 'Relay', s.relayRunning === true, s.relayRunning ? 'Running' : 'Stopped');
   setState('trimode', 'Trimode', s.trimodeSeen === true, s.trimodeSeen ? 'Running' : 'Offline');
 
-  const scannerGood = s.scannerEnabled === true;
-  const scannerText = s.scannerStatus || '--';
-  document.getElementById('scanner').innerHTML = `${led(scannerGood)}<span class="${scannerGood ? 'good' : 'bad'}">${scannerText}</span>`;
+  applyLiveRadioFields(s);
 
-  document.getElementById('current_freq').textContent = s.currentFrequencyKhz || '--';
-  document.getElementById('dial_freq').textContent = s.dialFrequencyKhz || '--';
-  document.getElementById('freq_source').textContent = s.liveFrequencySource === 'Trimode memory'
-    ? 'Live Trimode Frequency'
-    : 'Configured Frequency';
+  if(typeof s.refreshSeconds === 'number' && s.refreshSeconds >= 2)
+    refreshSeconds = s.refreshSeconds;
+  scheduleDashboardTimers();
 
   document.getElementById('sfi').textContent = s.lastSfi ?? '--';
   document.getElementById('sessions').textContent = s.sessionsToday ?? 0;
@@ -917,23 +969,7 @@ async function refreshCore(){
   renderStationHistory(s.recentStationConnections || []);
   renderUptimeMetrics(s.uptimeMetrics || []);
 
-  document.getElementById('memory_status').textContent = s.memoryReadStatus || '--';
-  document.getElementById('memory_address').textContent = s.memoryAddress || '--';
   document.getElementById('last_scan').textContent = s.lastScan || '--';
-  document.getElementById('source').textContent = s.liveFrequencySource || '--';
-
-  const channels = document.getElementById('channels');
-  channels.innerHTML = '';
-  for(const ch of (s.scanChannels || [])){
-    channels.innerHTML += `
-      <div class="simple-row">
-        <span>${ch.active ? '<span class="led"></span>' : '<span class="dim">○</span>&nbsp;&nbsp;'}${ch.frequencyKhz} kHz</span>
-        <span class="${ch.active ? 'good' : 'muted'}">${ch.active ? 'Live' : ch.mode}</span>
-      </div>`;
-  }
-  if(!(s.scanChannels || []).length){
-    channels.innerHTML = '<span class="muted">No scan channels found.</span>';
-  }
 
   renderEventList('power_events', power.events || [], 'No power events yet.', 'Power');
   renderEventList('events', s.recentEvents || [], 'No recent Winlink activity.', 'Winlink');
@@ -1240,8 +1276,57 @@ function renderUptimeMetrics(metrics){
   }
 }
 
+function applyLiveRadioFields(s){
+  const scannerEnabled = s.scannerEnabled === true;
+  const scannerUnknown = s.scannerEnabled == null;
+  const scannerText = s.scannerStatus || '--';
+  const scannerClass = scannerEnabled ? 'good' : (scannerUnknown ? 'muted' : 'bad');
+  document.getElementById('scanner').innerHTML = `${led(scannerEnabled)}<span class="${scannerClass}">${scannerText}</span>`;
+
+  document.getElementById('current_freq').textContent = s.currentFrequencyKhz || '--';
+  document.getElementById('dial_freq').textContent = s.dialFrequencyKhz || '--';
+  const src = (s.liveFrequencySource || '').toLowerCase();
+  let freqLabel = 'Configured Frequency';
+  if(src.includes('ci-v') || src.includes('manual') || src.includes('cat') || src.includes('rigctld'))
+    freqLabel = 'Live Radio Frequency (CI-V)';
+  else if(src.includes('trimode'))
+    freqLabel = 'Live Trimode Frequency';
+  document.getElementById('freq_source').textContent = freqLabel;
+
+  document.getElementById('memory_status').textContent = s.memoryReadStatus || '--';
+  document.getElementById('memory_address').textContent = s.memoryAddress || '--';
+  document.getElementById('source').textContent = s.liveFrequencySource || '--';
+  renderScanChannels(s.scanChannels);
+}
+
+function renderScanChannels(scanChannels){
+  const channels = document.getElementById('channels');
+  if(!channels) return;
+  channels.innerHTML = '';
+  for(const ch of (scanChannels || [])){
+    channels.innerHTML += `
+      <div class="simple-row">
+        <span>${ch.active ? '<span class="led"></span>' : '<span class="dim">○</span>&nbsp;&nbsp;'}${ch.frequencyKhz} kHz</span>
+        <span class="${ch.active ? 'good' : 'muted'}">${ch.active ? 'Live' : ch.mode}</span>
+      </div>`;
+  }
+  if(!(scanChannels || []).length){
+    channels.innerHTML = '<span class="muted">No scan channels found.</span>';
+  }
+}
+
+function scheduleDashboardTimers(){
+  if(statusRefreshTimer) clearInterval(statusRefreshTimer);
+  if(liveRadioTimer){
+    clearInterval(liveRadioTimer);
+    liveRadioTimer = null;
+  }
+  statusRefreshTimer = setInterval(refresh, Math.max(2, refreshSeconds) * 1000);
+  // Live-radio polling disabled: Trimode TCP/memory probes are off by default.
+}
+
 refresh();
-setInterval(refresh,5000);
+scheduleDashboardTimers();
 setInterval(refreshRfFast,1000);
 
 function batteryDetailsOpen(){

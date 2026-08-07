@@ -1,5 +1,5 @@
 #define MyAppName "Gateway Pulse"
-#define MyAppVersion "1.2.8"
+#define MyAppVersion "1.2.12"
 #define MyAppPublisher "Gateway Pulse"
 #define MyServiceName "GatewayPulse"
 
@@ -80,7 +80,7 @@ begin
   BatteryProtectPage := CreateInputQueryPage(wpSelectTasks,
     'Victron BatteryProtect',
     'Configure the BatteryProtect monitor',
-    'Enter the Bluetooth address and the path to the existing 32-hex-character key file. The key value is never stored in the installer.');
+    'Enter the Bluetooth address and the path to the existing 32-hex-character key file. The key value is never stored in the installer. On upgrades this page is skipped when appsettings.json already exists — MACs and C:\PWM\*.key files are kept.');
   BatteryProtectPage.Add('Bluetooth address:', False);
   BatteryProtectPage.Add('Key file:', False);
   BatteryProtectPage.Values[0] := '';
@@ -89,7 +89,7 @@ begin
   SmartShuntOptionPage := CreateInputOptionPage(BatteryProtectPage.ID,
     'Victron SmartShunt',
     'Optional SmartShunt configuration',
-    'Enable this only when the SmartShunt address and key file are available. Leaving it unchecked preserves an existing SmartShunt configuration during upgrades.',
+    'Enable this only when adding or changing a SmartShunt. Leave unchecked on upgrades to keep the existing SmartShunt (and BatteryProtect) configuration.',
     False, False);
   SmartShuntOptionPage.Add('Configure or update SmartShunt monitoring now');
   SmartShuntOptionPage.Values[0] := False;
@@ -124,11 +124,21 @@ begin
   Result := not IsVictronSelected;
 end;
 
+function HasExistingAppSettings: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\Service\appsettings.json'));
+end;
+
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := ((PageID = BatteryProtectPage.ID) or (PageID = SmartShuntOptionPage.ID)) and not IsVictronSelected;
   if PageID = SmartShuntPage.ID then
     Result := (not IsVictronSelected) or (not SmartShuntOptionPage.Values[0]);
+
+  // Upgrade: keep BatteryProtect MAC + key path already in appsettings / C:\PWM.
+  // SmartShunt pages stay available so a shunt can still be added later.
+  if IsVictronSelected and HasExistingAppSettings and (PageID = BatteryProtectPage.ID) then
+    Result := True;
 end;
 
 function IsHexCharacter(C: Char): Boolean;

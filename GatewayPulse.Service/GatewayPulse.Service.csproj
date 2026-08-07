@@ -14,6 +14,7 @@
     <ProjectReference Include="..\GatewayPulse.PowerMonitoring\GatewayPulse.PowerMonitoring.csproj" />
     <ProjectReference Include="..\GatewayPulse.RfMonitoring\GatewayPulse.RfMonitoring.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>

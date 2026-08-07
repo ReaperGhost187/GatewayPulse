@@ -191,7 +191,93 @@
       font-size:13px;
     }
 
-    @media(max-width:720px){
+    .settings-layout{
+      display:grid;
+      grid-template-columns:210px 1fr;
+      gap:16px;
+      align-items:start;
+    }
+
+    .subnav{
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      position:sticky;
+      top:14px;
+    }
+
+    .subnav button{
+      width:100%;
+      text-align:left;
+      border-radius:12px;
+      border:1px solid transparent;
+      background:transparent;
+      padding:11px 12px;
+      font-size:13px;
+      font-weight:800;
+      color:var(--muted);
+    }
+
+    .subnav button:hover{
+      border-color:var(--line2);
+      color:var(--text);
+      background:rgba(255,255,255,.03);
+    }
+
+    .subnav button.active{
+      border-color:rgba(79,195,247,.75);
+      color:var(--blue);
+      background:rgba(79,195,247,.1);
+    }
+
+    .panel{display:none}
+    .panel.active{display:block}
+
+    .pref-subtabs{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin:0 0 14px;
+    }
+
+    .pref-subtabs button{
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.025);
+      color:var(--muted);
+      padding:8px 12px;
+      font-size:12px;
+      font-weight:850;
+    }
+
+    .pref-subtabs button.active{
+      border-color:rgba(79,195,247,.75);
+      color:var(--blue);
+      background:rgba(79,195,247,.1);
+    }
+
+    .pref-pane{display:none}
+    .pref-pane.active{display:block}
+
+    select{
+      width:100%;
+      border:1px solid var(--line2);
+      border-radius:12px;
+      background:rgba(255,255,255,.035);
+      color:var(--text);
+      padding:11px 12px;
+      font:inherit;
+      outline:none;
+    }
+
+    @media(max-width:860px){
+      .settings-layout{grid-template-columns:1fr}
+      .subnav{position:static;flex-direction:row;flex-wrap:wrap}
+      .subnav button{width:auto}
       .field-grid,.pref-grid{grid-template-columns:1fr}
     }
   </style>
@@ -201,7 +287,7 @@
 <div class="shell">
   <header class="topbar">
     <div class="title">Gateway Pulse Settings</div>
-    <div class="subtitle">Gateway identity, Pushover, Network Map, alerts, and dashboard preferences stored in appsettings.json</div>
+    <div class="subtitle">Identity, alerts, RF, radio CI-V frequency, and display preferences — saved to appsettings.json</div>
     <nav class="nav">
       <a href="/">Dashboard</a>
       <a href="/rf-analysis.html">RF Analysis</a>
@@ -210,8 +296,18 @@
     </nav>
   </header>
 
+  <div class="settings-layout">
+    <aside class="subnav" id="settings_subnav">
+      <button type="button" data-panel="gateway" class="active">Gateway &amp; Alerts</button>
+      <button type="button" data-panel="network">Network Map</button>
+      <button type="button" data-panel="lp100">LP-100A / RF</button>
+      <button type="button" data-panel="radiocat">Radio Frequency (CI-V)</button>
+      <button type="button" data-panel="prefs">Display Preferences</button>
+    </aside>
+
   <main class="card">
     <form id="settings_form">
+      <div class="panel active" data-panel="gateway">
       <section class="section">
         <div class="label">Gateway Identity</div>
         <div class="field-grid">
@@ -292,7 +388,9 @@
           <input id="stationConnected" type="checkbox" />
         </label>
       </section>
+      </div>
 
+      <div class="panel" data-panel="network">
       <section class="section">
         <div class="label">Network Map</div>
         <p class="hint">
@@ -331,7 +429,9 @@
           <input id="networkMapAutoOpen" type="checkbox" />
         </label>
       </section>
+      </div>
 
+      <div class="panel" data-panel="lp100">
       <section class="section">
         <div class="label">LP-100A / RF Monitoring</div>
         <p class="hint">
@@ -427,16 +527,60 @@
           <span><b>Enable RF Pushover alerts</b><span>High/critical SWR while transmitting, reflected power, disconnect, stale, recovery.</span></span>
           <input id="lp100AlertsEnabled" type="checkbox" />
         </label>
+        <div class="actions pref-actions">
+          <button id="lp100Test" type="button">Test Connection</button>
+          <span class="message" id="lp100TestMessage"></span>
+        </div>
+        <p class="hint" id="lp100StatusHint">Connection status appears after Test Connection or when monitoring is enabled.</p>
+      </section>
+      </div>
+
+      <div class="panel" data-panel="radiocat">
+      <section class="section">
+        <div class="label">Radio Frequency (CI-V)</div>
+        <p class="hint">
+          Read-only live frequency from a dedicated Icom CI-V interface (CT-17 / USB CI-V).
+          Use a <b>different COM port</b> than Trimode’s radio control port.
+          Gateway Pulse only sends CI-V “read frequency” — never VFO, mode, or PTT.
+          Keep TrimodeProbe off; this path replaces Trimode memory frequency.
+        </p>
         <label class="setting">
           <span>
-            <b>Prefer radio CAT frequency (rigctld)</b>
-            <span>When enabled, TX history prefers Hamlib rigctld over Winlink/Trimode. Without CAT, Winlink frequency may be Stale if the radio was moved manually.</span>
+            <b>Enable radio frequency source</b>
+            <span>Poll CI-V (or optional rigctld) for dashboard frequency and TX history tags.</span>
           </span>
           <input id="radioCatEnabled" type="checkbox" />
         </label>
         <div class="field-grid">
           <label class="field">
-            <span>rigctld host</span>
+            <span>Mode</span>
+            <select id="radioCatMode">
+              <option value="CivCom">CI-V COM (recommended)</option>
+              <option value="Rigctld">Hamlib rigctld</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Poll interval (seconds)</span>
+            <input id="radioCatPollSeconds" type="text" autocomplete="off" inputmode="numeric" placeholder="2" />
+          </label>
+          <label class="field">
+            <span>CI-V COM port</span>
+            <select id="radioCatPortName"></select>
+          </label>
+          <label class="field">
+            <span>Or type COM port</span>
+            <input id="radioCatPortNameText" type="text" autocomplete="off" placeholder="COM5" />
+          </label>
+          <label class="field">
+            <span>Baud rate</span>
+            <input id="radioCatBaud" type="text" autocomplete="off" inputmode="numeric" placeholder="19200" />
+          </label>
+          <label class="field">
+            <span>CI-V address (hex)</span>
+            <input id="radioCatCivAddress" type="text" autocomplete="off" placeholder="94" title="IC-7300 default is usually 94" />
+          </label>
+          <label class="field">
+            <span>rigctld host (optional mode)</span>
             <input id="radioCatHost" type="text" autocomplete="off" placeholder="127.0.0.1" />
           </label>
           <label class="field">
@@ -445,34 +589,45 @@
           </label>
         </div>
         <div class="actions pref-actions">
-          <button id="lp100Test" type="button">Test Connection</button>
-          <span class="message" id="lp100TestMessage"></span>
+          <button id="radioCatTest" type="button">Test CI-V / CAT</button>
+          <button id="radioCatRefreshPorts" type="button">Refresh COM Ports</button>
+          <span class="message" id="radioCatTestMessage"></span>
         </div>
-        <p class="hint" id="lp100StatusHint">Connection status appears after Test Connection or when monitoring is enabled.</p>
+        <p class="hint" id="radioCatStatusHint">Save settings, then Test. Leave disabled until the CT-17 cable is connected.</p>
       </section>
+      </div>
 
+      <div class="panel" data-panel="prefs">
       <section class="section">
-        <div class="label">Preferences</div>
+        <div class="label">Display Preferences</div>
         <p class="hint">
-          Choose which dashboard cards and Power System fields are visible.
+          Choose which dashboard cards and metrics are visible.
           Monitoring, alarms, logging, and API output continue even when items are hidden.
           Active power alarms still appear in the main status banner if the Power System card is hidden.
           RF primary metrics (Forward, Reflected, SWR, Peak) are always shown when the RF card is visible.
         </p>
 
-        <div class="label" style="margin-top:8px">Dashboard cards</div>
-        <div class="pref-grid" id="pref_cards"></div>
+        <div class="pref-subtabs" id="pref_subtabs">
+          <button type="button" data-pref="cards" class="active">Dashboard cards</button>
+          <button type="button" data-pref="power">Power metrics</button>
+          <button type="button" data-pref="rf">RF metrics</button>
+        </div>
 
-        <div class="label" style="margin-top:18px">Power System telemetry</div>
-        <div class="pref-grid" id="pref_telemetry"></div>
-
-        <div class="label" style="margin-top:18px">RF Metrics (expanded section)</div>
-        <div class="pref-grid" id="pref_rf_telemetry"></div>
+        <div class="pref-pane active" data-pref="cards">
+          <div class="pref-grid" id="pref_cards"></div>
+        </div>
+        <div class="pref-pane" data-pref="power">
+          <div class="pref-grid" id="pref_telemetry"></div>
+        </div>
+        <div class="pref-pane" data-pref="rf">
+          <div class="pref-grid" id="pref_rf_telemetry"></div>
+        </div>
 
         <div class="actions pref-actions">
           <button id="resetPreferences" type="button">Reset to Defaults</button>
         </div>
       </section>
+      </div>
 
       <div class="actions">
         <button id="save" type="submit">Save Settings</button>
@@ -481,6 +636,7 @@
       </div>
     </form>
   </main>
+  </div>
 
   <div class="footer">
     Gateway Pulse only edits its own appsettings.json. It never controls Relay or Trimode.
@@ -490,6 +646,82 @@
 <script src="/dashboard-preferences.js?v=1.0.1"></script>
 <script src="/network-map.js?v=1.0.0"></script>
 <script>
+document.querySelectorAll('#settings_subnav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const panel = btn.getAttribute('data-panel');
+    document.querySelectorAll('#settings_subnav button').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.getAttribute('data-panel') === panel));
+  });
+});
+
+document.querySelectorAll('#pref_subtabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const pref = btn.getAttribute('data-pref');
+    document.querySelectorAll('#pref_subtabs button').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.pref-pane').forEach(p => p.classList.toggle('active', p.getAttribute('data-pref') === pref));
+  });
+});
+
+async function loadComPorts(selected){
+  const select = document.getElementById('radioCatPortName');
+  const current = selected || select.value || document.getElementById('radioCatPortNameText').value || '';
+  select.innerHTML = '<option value="">(select COM port)</option>';
+  try{
+    const response = await fetch('/api/settings/com-ports', { cache:'no-store' });
+    const data = await response.json();
+    const ports = data.ports || data.Ports || [];
+    for(const port of ports){
+      const opt = document.createElement('option');
+      opt.value = port;
+      opt.textContent = port;
+      if(String(port).toUpperCase() === String(current).toUpperCase()) opt.selected = true;
+      select.appendChild(opt);
+    }
+    if(current && ![...select.options].some(o => o.value.toUpperCase() === String(current).toUpperCase())){
+      const opt = document.createElement('option');
+      opt.value = current;
+      opt.textContent = current + ' (saved)';
+      opt.selected = true;
+      select.appendChild(opt);
+    }
+  }catch{
+    /* keep empty list */
+  }
+}
+
+function readRadioCatPortName(){
+  const typed = document.getElementById('radioCatPortNameText').value.trim();
+  if(typed) return typed.toUpperCase();
+  return (document.getElementById('radioCatPortName').value || '').trim().toUpperCase();
+}
+
+function readRadioCatFromForm(){
+  return {
+    Enabled: document.getElementById('radioCatEnabled').checked,
+    Mode: document.getElementById('radioCatMode').value || 'CivCom',
+    PortName: readRadioCatPortName(),
+    BaudRate: Number(document.getElementById('radioCatBaud').value) || 19200,
+    CivAddress: (document.getElementById('radioCatCivAddress').value || '94').trim(),
+    PollSeconds: Number(document.getElementById('radioCatPollSeconds').value) || 2,
+    Host: document.getElementById('radioCatHost').value.trim() || '127.0.0.1',
+    Port: Number(document.getElementById('radioCatPort').value) || 4532,
+    TimeoutMs: 400
+  };
+}
+
+function applyRadioCatToForm(radioCat){
+  document.getElementById('radioCatEnabled').checked = !!readValue(radioCat, 'enabled', 'Enabled', false);
+  document.getElementById('radioCatMode').value = readValue(radioCat, 'mode', 'Mode', 'CivCom') || 'CivCom';
+  document.getElementById('radioCatPollSeconds').value = String(readValue(radioCat, 'pollSeconds', 'PollSeconds', 2));
+  document.getElementById('radioCatBaud').value = String(readValue(radioCat, 'baudRate', 'BaudRate', 19200));
+  document.getElementById('radioCatCivAddress').value = readValue(radioCat, 'civAddress', 'CivAddress', '94');
+  document.getElementById('radioCatHost').value = readValue(radioCat, 'host', 'Host', '127.0.0.1');
+  document.getElementById('radioCatPort').value = String(readValue(radioCat, 'port', 'Port', 4532));
+  const portName = readValue(radioCat, 'portName', 'PortName', '');
+  document.getElementById('radioCatPortNameText').value = portName || '';
+  return loadComPorts(portName);
+}
+
 const alertFields = [
   ['relayOffline', 'RelayOffline'],
   ['trimodeOffline', 'TrimodeOffline'],
@@ -711,9 +943,7 @@ async function loadSettings(){
 
     applyLp100ToForm(lp100);
     const radioCat = readValue(gatewayPulse, 'radioCat', 'RadioCat', {}) || {};
-    document.getElementById('radioCatEnabled').checked = !!readValue(radioCat, 'enabled', 'Enabled', false);
-    document.getElementById('radioCatHost').value = readValue(radioCat, 'host', 'Host', '127.0.0.1');
-    document.getElementById('radioCatPort').value = String(readValue(radioCat, 'port', 'Port', 4532));
+    await applyRadioCatToForm(radioCat);
     applyPreferencesToForm(preferences);
     setMessage('Settings loaded.', 'good');
   }
@@ -748,12 +978,7 @@ document.getElementById('settings_form').addEventListener('submit', async event 
     GatewayPulse:{
       GatewayName:document.getElementById('gatewayName').value,
       Callsign:document.getElementById('callsign').value,
-      RadioCat:{
-        Enabled: document.getElementById('radioCatEnabled').checked,
-        Host: document.getElementById('radioCatHost').value.trim() || '127.0.0.1',
-        Port: Number(document.getElementById('radioCatPort').value) || 4532,
-        TimeoutMs: 400
-      }
+      RadioCat: readRadioCatFromForm()
     },
     Pushover:{
       Enabled:document.getElementById('pushoverEnabled').checked,
@@ -911,7 +1136,70 @@ document.getElementById('lp100Test').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('radioCatRefreshPorts').addEventListener('click', () => {
+  loadComPorts(readRadioCatPortName());
+});
+
+document.getElementById('radioCatTest').addEventListener('click', async () => {
+  const btn = document.getElementById('radioCatTest');
+  const msg = document.getElementById('radioCatTestMessage');
+  const hint = document.getElementById('radioCatStatusHint');
+  btn.disabled = true;
+  msg.textContent = 'Testing...';
+  msg.className = 'message';
+  try{
+    // Persist RadioCat first so the test uses form values.
+    await fetch('/api/settings', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        GatewayPulse:{
+          GatewayName:document.getElementById('gatewayName').value,
+          Callsign:document.getElementById('callsign').value,
+          RadioCat: readRadioCatFromForm()
+        },
+        Pushover:{
+          Enabled:document.getElementById('pushoverEnabled').checked,
+          UserKey:document.getElementById('pushoverUserKey').value,
+          ApiToken:document.getElementById('pushoverApiToken').value
+        },
+        Alerts:Object.fromEntries(alertFields.map(([c,p]) => [p, document.getElementById(c).checked])),
+        Preferences: preferencesPayload(readPreferencesFromForm()),
+        NetworkMap: (() => {
+          const map = readNetworkMapFromForm();
+          return {
+            ServiceCode: map.serviceCode,
+            RememberServiceCode: map.rememberServiceCode,
+            AutoRefresh: map.autoRefresh,
+            AutoRefreshMinutes: map.autoRefreshMinutes,
+            AutoOpenInBrowser: map.autoOpenInBrowser,
+            MapUrl: map.mapUrl
+          };
+        })(),
+        Lp100Monitor: readLp100FromForm()
+      })
+    });
+    const response = await fetch('/api/radiocat/test', { method:'POST' });
+    const result = await response.json();
+    if(!response.ok || !result.ok){
+      throw new Error((result && result.status) || 'CI-V / CAT test failed.');
+    }
+    msg.textContent = `OK ${result.frequencyKhz} kHz`;
+    msg.className = 'message good';
+    hint.textContent = `${result.source || 'CAT'}: ${result.status || 'OK'}`;
+  }
+  catch(error){
+    msg.textContent = error.message || 'Test failed.';
+    msg.className = 'message bad';
+    hint.textContent = 'Confirm CI-V COM port, baud, address (7300 often 94), and that Trimode is using a different COM.';
+  }
+  finally{
+    btn.disabled = false;
+  }
+});
+
 applyPreferencesToForm(DashboardPreferences.defaults());
+loadComPorts();
 loadSettings().then(() => refreshLp100RawDiagnostics());
 setInterval(refreshLp100RawDiagnostics, 10000);
 </script>

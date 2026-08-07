@@ -28,9 +28,25 @@ public sealed class GatewayPulseService
     private decimal? _observedFrequencyKhz;
     private string _observedFrequencySource = "Unknown";
     private DateTimeOffset? _observedFrequencyUpdatedAt;
+    private int _lastScanMemoryValue;
+    private int _scanStagnantPolls;
+    private DateTime _lastFullScanSearchUtc = DateTime.MinValue;
+    private readonly List<IntPtr> _scanProbeAddresses = new();
+    private readonly Dictionary<long, int> _scanProbeLastValues = new();
+    private bool? _lastKnownScannerEnabled;
+    private DateTime _lastScannerOkUtc = DateTime.MinValue;
+    private DateTime _lastScannerAttemptUtc = DateTime.MinValue;
+    private DateTime _lastIniParseUtc = DateTime.MinValue;
 
     /// <summary>Consecutive memory-read misses before clearing TX observation (avoids flicker).</summary>
     private const int FrequencyMissGracePolls = 2;
+    private const int ScanStagnantPollsBeforeRescan = 3;
+    /// <summary>Full Trimode VA walks are expensive — never more often than this.</summary>
+    private const int FullScanSearchMinIntervalMs = 10_000;
+    private const int ScannerStaleGraceSeconds = 30;
+    /// <summary>TCP SCAN is read-only but opening :8510 too often can upset Trimode.</summary>
+    private const int ScannerPollMinIntervalSeconds = 15;
+    private const int IniParseMinIntervalSeconds = 60;
 
     public GatewayPulseService(
         IOptionsMonitor<GatewayPulseOptions> options,
@@ -40,15 +56,38 @@ public sealed class GatewayPulseService
         _options = options;
         _alerts = alerts;
         _pushover = pushover;
-        Refresh();
+        _ = GetStatus();
     }
 
     public GatewayStatus GetStatus()
     {
+        // Log parsing is expensive — keep it outside the lock so the live-radio poller
+        // can keep tracking Trimode scan hops while /api/status is building.
+        var status = BuildStatusFromLogs();
+
         lock (_lock)
         {
-            Refresh();
-            return _status;
+            // Never start/stop Trimode. Probes are opt-in — off by default (can recycle Trimode).
+            var probe = _options.CurrentValue.TrimodeProbe ?? new TrimodeProbeOptions();
+            if (probe.CommandPortEnabled)
+                PollTrimodeScannerStatus(status, force: true, allowRetry: false);
+            else
+                ApplyProbeDisabledScannerStatus(status);
+
+            if (probe.MemoryReadEnabled)
+                TryReadTrimodeMemory(status, allowFullMemorySearch: true);
+            else
+                ApplyProbeDisabledFrequencyStatus(status);
+
+            status.Healthy =
+                status.RelayRunning == true &&
+                status.TrimodeSeen &&
+                status.ScannerEnabled != false;
+
+            EvaluateAlerts(status);
+            EvaluateStationAlert(status);
+            _status = status;
+            return status;
         }
     }
 
@@ -69,7 +108,136 @@ public sealed class GatewayPulseService
         }
     }
 
-    private void Refresh()
+    /// <summary>Last known station without running a full log/status refresh.</summary>
+    public string? PeekLastStation()
+    {
+        lock (_lock)
+            return string.IsNullOrWhiteSpace(_status.LastStation) ? null : _status.LastStation;
+    }
+
+    /// <summary>
+    /// Live-radio poller entry point. No-op unless TrimodeProbe is explicitly enabled.
+    /// </summary>
+    public GatewayStatus RefreshLiveRadioState()
+    {
+        lock (_lock)
+        {
+            var probe = _options.CurrentValue.TrimodeProbe ?? new TrimodeProbeOptions();
+            if (!probe.CommandPortEnabled && !probe.MemoryReadEnabled)
+            {
+                _status.TrimodeSeen = IsProcessRunning("RMS Trimode");
+                ApplyProbeDisabledScannerStatus(_status);
+                ApplyProbeDisabledFrequencyStatus(_status);
+                _status.Healthy =
+                    _status.RelayRunning == true &&
+                    _status.TrimodeSeen &&
+                    _status.ScannerEnabled != false;
+                return SnapshotLiveRadio(_status);
+            }
+
+            var now = DateTime.UtcNow;
+            var live = new GatewayStatus
+            {
+                GatewayName = _status.GatewayName,
+                Callsign = _status.Callsign,
+                DemoMode = _status.DemoMode,
+                TrimodeSeen = IsProcessRunning("RMS Trimode")
+            };
+
+            if (_status.ScanChannels.Count > 0 &&
+                _lastIniParseUtc != DateTime.MinValue &&
+                (now - _lastIniParseUtc).TotalSeconds < IniParseMinIntervalSeconds)
+            {
+                live.ScanChannels = _status.ScanChannels
+                    .Select(c => new ScanChannel
+                    {
+                        Number = c.Number,
+                        FrequencyKhz = c.FrequencyKhz,
+                        FrequencyHz = c.FrequencyHz,
+                        Mode = c.Mode,
+                        Active = c.Active,
+                        ServiceCode = c.ServiceCode
+                    })
+                    .ToList();
+            }
+            else
+            {
+                ParseTrimodeIni(live);
+                _lastIniParseUtc = now;
+            }
+
+            if (probe.CommandPortEnabled)
+                PollTrimodeScannerStatus(live, force: false, allowRetry: false);
+            else
+                ApplyProbeDisabledScannerStatus(live);
+
+            if (probe.MemoryReadEnabled)
+                TryReadTrimodeMemory(live, allowFullMemorySearch: false);
+            else
+                ApplyProbeDisabledFrequencyStatus(live);
+
+            _status.TrimodeSeen = live.TrimodeSeen;
+            _status.ScannerEnabled = live.ScannerEnabled;
+            _status.ScannerStatus = live.ScannerStatus;
+            _status.CommandPortStatus = live.CommandPortStatus;
+            _status.MemoryReadStatus = live.MemoryReadStatus;
+            _status.MemoryAddress = live.MemoryAddress;
+            _status.CurrentFrequencyKhz = live.CurrentFrequencyKhz;
+            _status.DialFrequencyKhz = live.DialFrequencyKhz;
+            _status.LiveFrequencySource = live.LiveFrequencySource;
+            _status.FrequencyUpdatedAt = live.FrequencyUpdatedAt;
+            _status.ScanChannels = live.ScanChannels;
+            _status.Healthy =
+                _status.RelayRunning == true &&
+                _status.TrimodeSeen &&
+                _status.ScannerEnabled != false;
+
+            return SnapshotLiveRadio(_status);
+        }
+    }
+
+    private static void ApplyProbeDisabledScannerStatus(GatewayStatus status)
+    {
+        status.ScannerEnabled = null;
+        status.ScannerStatus = "Not probed";
+        status.CommandPortStatus = "Disabled (TrimodeProbe.CommandPortEnabled=false)";
+    }
+
+    private void ApplyProbeDisabledFrequencyStatus(GatewayStatus status)
+    {
+        status.MemoryReadStatus = "Disabled (TrimodeProbe.MemoryReadEnabled=false)";
+        status.MemoryAddress = "";
+        status.CurrentFrequencyKhz = "--";
+        status.DialFrequencyKhz = "--";
+        status.LiveFrequencySource = "Configured";
+        status.FrequencyUpdatedAt = null;
+        ClearFrequencyObservation();
+    }
+
+    public GatewayStatus GetLiveRadioSnapshot()
+    {
+        lock (_lock)
+            return SnapshotLiveRadio(_status);
+    }
+
+    private static GatewayStatus SnapshotLiveRadio(GatewayStatus status) => new()
+    {
+        TrimodeSeen = status.TrimodeSeen,
+        ScannerEnabled = status.ScannerEnabled,
+        ScannerStatus = status.ScannerStatus,
+        CommandPortStatus = status.CommandPortStatus,
+        MemoryReadStatus = status.MemoryReadStatus,
+        MemoryAddress = status.MemoryAddress,
+        CurrentFrequencyKhz = status.CurrentFrequencyKhz,
+        DialFrequencyKhz = status.DialFrequencyKhz,
+        LiveFrequencySource = status.LiveFrequencySource,
+        FrequencyUpdatedAt = status.FrequencyUpdatedAt,
+        ScanChannels = status.ScanChannels,
+        Healthy = status.Healthy,
+        LastScan = status.LastScan
+    };
+
+    private GatewayStatus BuildStatusFromLogs()
     {
         var options = _options.CurrentValue;
 
@@ -91,17 +259,7 @@ public sealed class GatewayPulseService
         ParseRelayLogs(status, eventsList, stationCounts, stationConnections, hourlyActivity);
         ParseTrimodeLogs(status, eventsList, hourlyActivity);
         ParseTrimodeIni(status);
-        PollTrimodeScannerStatus(status);
-        TryReadTrimodeMemory(status);
         ApplyProcessStartTimes(status);
-
-        status.Healthy =
-            status.RelayRunning == true &&
-            status.TrimodeSeen &&
-            status.ScannerEnabled != false;
-
-        EvaluateAlerts(status);
-        EvaluateStationAlert(status);
 
         status.StationCounts = stationCounts
             .OrderByDescending(kv => kv.Value)
@@ -123,7 +281,7 @@ public sealed class GatewayPulseService
             .Take(80)
             .ToList();
 
-        _status = status;
+        return status;
     }
 
     private void EvaluateAlerts(GatewayStatus status)
@@ -209,7 +367,7 @@ public sealed class GatewayPulseService
             $"{status.GatewayName}\n\nStation connected: {status.LastStation}\n\n{status.LastRelayEvent}");
     }
 
-    private void TryReadTrimodeMemory(GatewayStatus status)
+    private void TryReadTrimodeMemory(GatewayStatus status, bool allowFullMemorySearch = true)
     {
         if (!status.TrimodeSeen)
         {
@@ -253,46 +411,174 @@ public sealed class GatewayPulseService
 
             if (scannerStopped)
             {
+                // Dial range scrape walks a lot of memory — only on full status refreshes.
+                if (!allowFullMemorySearch)
+                {
+                    if (_cachedFrequencyAddress != IntPtr.Zero &&
+                        reader.TryReadInt32(_cachedFrequencyAddress, out var dialCached) &&
+                        TrimodeFrequencyHeuristics.IsPlausibleHfHz(dialCached))
+                    {
+                        ApplyLiveFrequency(status, dialCached, "Trimode dial", _cachedFrequencyAddress);
+                        status.MemoryReadStatus = "OK cached dial";
+                        return;
+                    }
+
+                    status.MemoryReadStatus = "Dial rediscovery deferred (live poll)";
+                    return;
+                }
+
                 TryReadTrimodeDialFrequency(status, reader, expected);
                 return;
             }
 
-            // Scanning or unknown: scan-list Int32 match only.
+            // Scanning or unknown: scan-list Int32 match only (never trust LooksLikeArray config rows).
             ResetPendingDialCandidate();
-
-            if (_cachedFrequencyAddress != IntPtr.Zero &&
-                reader.TryReadInt32(_cachedFrequencyAddress, out var cachedValue) &&
-                expected.Contains(cachedValue))
-            {
-                ApplyLiveFrequency(status, cachedValue, "Trimode memory", _cachedFrequencyAddress);
-                status.MemoryReadStatus = scannerScanning ? "OK cached (scan)" : "OK cached";
-                return;
-            }
-
-            _cachedFrequencyAddress = IntPtr.Zero;
-
-            var candidates = reader.FindInt32Candidates(expected, maxCandidates: 40);
-
-            var chosen = candidates.FirstOrDefault(c => !c.LooksLikeArray);
-            if (chosen is null && candidates.Count > 0)
-                chosen = candidates[0];
-
-            if (chosen is null)
-            {
-                NoteFrequencyMiss(status, "No frequency candidate found");
-                return;
-            }
-
-            _cachedFrequencyAddress = chosen.Address;
-            ApplyLiveFrequency(status, chosen.Value, "Trimode memory", chosen.Address);
-            status.MemoryReadStatus = chosen.LooksLikeArray
-                ? $"Candidate found, may be config array ({candidates.Count})"
-                : $"OK candidate found ({candidates.Count})";
+            TryReadTrimodeScanFrequency(status, reader, expected, scannerScanning, allowFullMemorySearch);
         }
         catch (Exception ex)
         {
             NoteFrequencyMiss(status, "Memory read error: " + ex.GetType().Name, clearCache: true);
         }
+    }
+
+    private void TryReadTrimodeScanFrequency(
+        GatewayStatus status,
+        ProcessMemoryReader reader,
+        HashSet<int> expected,
+        bool scannerScanning,
+        bool allowFullMemorySearch)
+    {
+        // Cheap path: re-read known probe addresses; prefer any cell that changed since last poll.
+        if (_scanProbeAddresses.Count > 0)
+        {
+            var previousByAddress = new Dictionary<long, int>(_scanProbeLastValues);
+            var probeCandidates = new List<MemoryCandidate>();
+            foreach (var addr in _scanProbeAddresses)
+            {
+                if (!reader.TryReadInt32(addr, out var value) || !expected.Contains(value))
+                    continue;
+                probeCandidates.Add(new MemoryCandidate { Address = addr, Value = value });
+            }
+
+            var hopped = TrimodeFrequencyHeuristics.ChooseScanningCandidate(
+                probeCandidates,
+                preferredAddress: _cachedFrequencyAddress,
+                excludeAddress: IntPtr.Zero,
+                previousHz: _lastScanMemoryValue > 0 ? _lastScanMemoryValue : null,
+                previousByAddress: previousByAddress);
+
+            foreach (var c in probeCandidates)
+                _scanProbeLastValues[c.Address.ToInt64()] = c.Value;
+
+            if (hopped is not null &&
+                previousByAddress.TryGetValue(hopped.Address.ToInt64(), out var was) &&
+                was != hopped.Value)
+            {
+                AcceptScanFrequency(status, hopped, "OK live (changing)");
+                return;
+            }
+        }
+
+        // Cached address still holds a scan-list value.
+        if (_cachedFrequencyAddress != IntPtr.Zero &&
+            reader.TryReadInt32(_cachedFrequencyAddress, out var cachedValue) &&
+            expected.Contains(cachedValue))
+        {
+            if (!scannerScanning || cachedValue != _lastScanMemoryValue)
+            {
+                _scanStagnantPolls = 0;
+                AcceptScanFrequency(status, new MemoryCandidate
+                {
+                    Address = _cachedFrequencyAddress,
+                    Value = cachedValue
+                }, scannerScanning ? "OK cached (scan)" : "OK cached");
+                return;
+            }
+
+            _scanStagnantPolls++;
+            if (_scanStagnantPolls < ScanStagnantPollsBeforeRescan)
+            {
+                AcceptScanFrequency(status, new MemoryCandidate
+                {
+                    Address = _cachedFrequencyAddress,
+                    Value = cachedValue
+                }, "OK cached (scan)");
+                return;
+            }
+            // Stagnant while scanning → likely a static scan-list table cell; rediscover.
+        }
+
+        var now = DateTime.UtcNow;
+        var searchDue = allowFullMemorySearch &&
+                        (now - _lastFullScanSearchUtc).TotalMilliseconds >= FullScanSearchMinIntervalMs;
+
+        if (!searchDue)
+        {
+            if (_cachedFrequencyAddress != IntPtr.Zero &&
+                reader.TryReadInt32(_cachedFrequencyAddress, out var holdValue) &&
+                expected.Contains(holdValue))
+            {
+                ApplyLiveFrequency(status, holdValue, "Trimode memory", _cachedFrequencyAddress);
+                status.MemoryReadStatus = allowFullMemorySearch
+                    ? "OK cached (scan, awaiting rediscovery)"
+                    : "OK cached (scan)";
+                return;
+            }
+
+            status.MemoryReadStatus = allowFullMemorySearch
+                ? "Scan rediscovery rate-limited"
+                : "Scan rediscovery deferred (live poll)";
+            return;
+        }
+
+        _lastFullScanSearchUtc = now;
+        var exclude = _scanStagnantPolls >= ScanStagnantPollsBeforeRescan
+            ? _cachedFrequencyAddress
+            : IntPtr.Zero;
+
+        var priorProbeValues = new Dictionary<long, int>(_scanProbeLastValues);
+        var candidates = reader.FindInt32Candidates(expected, maxCandidates: 60);
+        var usable = candidates.Where(c => !c.LooksLikeArray).ToList();
+
+        _scanProbeAddresses.Clear();
+        foreach (var c in usable.Take(40))
+            _scanProbeAddresses.Add(c.Address);
+
+        foreach (var c in usable)
+            _scanProbeLastValues[c.Address.ToInt64()] = c.Value;
+
+        var chosen = TrimodeFrequencyHeuristics.ChooseScanningCandidate(
+            usable,
+            preferredAddress: IntPtr.Zero,
+            excludeAddress: exclude,
+            previousHz: _lastScanMemoryValue > 0 ? _lastScanMemoryValue : null,
+            previousByAddress: priorProbeValues);
+
+        if (chosen is null)
+        {
+            NoteFrequencyMiss(status, usable.Count == 0
+                ? "No frequency candidate found"
+                : "No usable scan frequency candidate");
+            return;
+        }
+
+        var changed = priorProbeValues.TryGetValue(chosen.Address.ToInt64(), out var prev) &&
+                      prev != chosen.Value;
+        AcceptScanFrequency(
+            status,
+            chosen,
+            changed ? "OK live (changing)" : $"OK candidate found ({usable.Count})");
+    }
+
+    private void AcceptScanFrequency(GatewayStatus status, MemoryCandidate chosen, string memoryStatus)
+    {
+        _cachedFrequencyAddress = chosen.Address;
+        if (chosen.Value != _lastScanMemoryValue)
+            _scanStagnantPolls = 0;
+        _lastScanMemoryValue = chosen.Value;
+        _scanProbeLastValues[chosen.Address.ToInt64()] = chosen.Value;
+        ApplyLiveFrequency(status, chosen.Value, "Trimode memory", chosen.Address);
+        status.MemoryReadStatus = memoryStatus;
     }
 
     private void TryReadTrimodeDialFrequency(
@@ -402,6 +688,10 @@ public sealed class GatewayPulseService
         _observedFrequencyKhz = null;
         _observedFrequencySource = "Unknown";
         _observedFrequencyUpdatedAt = null;
+        _lastScanMemoryValue = 0;
+        _scanStagnantPolls = 0;
+        _scanProbeAddresses.Clear();
+        _scanProbeLastValues.Clear();
     }
 
     private void ResetPendingDialCandidate()
@@ -411,23 +701,35 @@ public sealed class GatewayPulseService
         _pendingDialConfirmations = 0;
     }
 
-    private void PollTrimodeScannerStatus(GatewayStatus status)
+    private void PollTrimodeScannerStatus(GatewayStatus status, bool force = true, bool allowRetry = false)
     {
         if (!status.TrimodeSeen)
         {
             status.ScannerEnabled = null;
             status.ScannerStatus = "Trimode Offline";
             status.CommandPortStatus = "Trimode offline";
+            _lastKnownScannerEnabled = null;
+            _lastScannerOkUtc = DateTime.MinValue;
             return;
         }
 
+        var now = DateTime.UtcNow;
+        if (!force &&
+            _lastScannerAttemptUtc != DateTime.MinValue &&
+            (now - _lastScannerAttemptUtc).TotalSeconds < ScannerPollMinIntervalSeconds)
+        {
+            ApplyCachedScannerStatus(status, "Deferred (live poll)");
+            return;
+        }
+
+        _lastScannerAttemptUtc = now;
         var response = SendTrimodeCommand("SCAN");
+        if (allowRetry && string.IsNullOrWhiteSpace(response))
+            response = SendTrimodeCommand("SCAN");
 
         if (string.IsNullOrWhiteSpace(response))
         {
-            status.ScannerEnabled = null;
-            status.ScannerStatus = "Unknown";
-            status.CommandPortStatus = "No response from command port";
+            ApplyStaleScannerStatus(status, "No response from command port");
             return;
         }
 
@@ -440,13 +742,49 @@ public sealed class GatewayPulseService
             var enabled = m.Groups[1].Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase);
             status.ScannerEnabled = enabled;
             status.ScannerStatus = enabled ? "Scanning" : "Stopped";
+            _lastKnownScannerEnabled = enabled;
+            _lastScannerOkUtc = DateTime.UtcNow;
         }
         else
         {
-            status.ScannerEnabled = null;
-            status.ScannerStatus = "Unknown";
-            status.CommandPortStatus = "Unexpected response: " + response.Replace("\r", " ").Replace("\n", " ").Trim();
+            ApplyStaleScannerStatus(
+                status,
+                "Unexpected response: " + response.Replace("\r", " ").Replace("\n", " ").Trim());
         }
+    }
+
+    private void ApplyCachedScannerStatus(GatewayStatus status, string commandPortNote)
+    {
+        if (_lastKnownScannerEnabled is bool known)
+        {
+            status.ScannerEnabled = known;
+            status.ScannerStatus = known ? "Scanning" : "Stopped";
+            status.CommandPortStatus = commandPortNote;
+            return;
+        }
+
+        status.ScannerEnabled = _status.ScannerEnabled;
+        status.ScannerStatus = string.IsNullOrWhiteSpace(_status.ScannerStatus)
+            ? "Unknown"
+            : _status.ScannerStatus;
+        status.CommandPortStatus = commandPortNote;
+    }
+
+    private void ApplyStaleScannerStatus(GatewayStatus status, string commandPortStatus)
+    {
+        if (_lastKnownScannerEnabled is bool known &&
+            _lastScannerOkUtc != DateTime.MinValue &&
+            (DateTime.UtcNow - _lastScannerOkUtc).TotalSeconds <= ScannerStaleGraceSeconds)
+        {
+            status.ScannerEnabled = known;
+            status.ScannerStatus = known ? "Scanning" : "Stopped";
+            status.CommandPortStatus = commandPortStatus + " (using last known)";
+            return;
+        }
+
+        status.ScannerEnabled = null;
+        status.ScannerStatus = "Unknown";
+        status.CommandPortStatus = commandPortStatus;
     }
 
     private string SendTrimodeCommand(string command)
@@ -456,29 +794,37 @@ public sealed class GatewayPulseService
             using var tcp = new TcpClient();
             var options = _options.CurrentValue;
             var connectTask = tcp.ConnectAsync(options.TrimodeHost, options.TrimodeCommandPort);
-            if (!connectTask.Wait(TimeSpan.FromMilliseconds(750)))
+            if (!connectTask.Wait(TimeSpan.FromMilliseconds(500)))
                 return "";
 
             using var stream = tcp.GetStream();
-            stream.ReadTimeout = 750;
-            stream.WriteTimeout = 750;
+            stream.ReadTimeout = 500;
+            stream.WriteTimeout = 500;
 
             var buffer = new byte[4096];
 
-            Thread.Sleep(80);
-            if (stream.DataAvailable)
+            // Drain any leftover banner bytes without a long fixed sleep.
+            var drainDeadline = Environment.TickCount64 + 60;
+            while (Environment.TickCount64 < drainDeadline && stream.DataAvailable)
                 _ = stream.Read(buffer, 0, buffer.Length);
 
             var msg = Encoding.ASCII.GetBytes(command + "\r");
             stream.Write(msg, 0, msg.Length);
 
-            Thread.Sleep(150);
+            var readDeadline = Environment.TickCount64 + 350;
+            while (Environment.TickCount64 < readDeadline)
+            {
+                if (stream.DataAvailable)
+                {
+                    var count = stream.Read(buffer, 0, buffer.Length);
+                    if (count > 0)
+                        return Encoding.ASCII.GetString(buffer, 0, count);
+                }
 
-            if (!stream.DataAvailable)
-                return "";
+                Thread.Sleep(20);
+            }
 
-            var count = stream.Read(buffer, 0, buffer.Length);
-            return Encoding.ASCII.GetString(buffer, 0, count);
+            return "";
         }
         catch
         {
@@ -777,7 +1123,16 @@ public sealed class GatewayPulseService
 
     private static IEnumerable<string> SafeReadLines(string file)
     {
-        try { return File.ReadLines(file); }
+        // Share read/write so Trimode/Relay can keep writing logs/INI while we observe.
+        try
+        {
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            var lines = new List<string>();
+            while (!reader.EndOfStream)
+                lines.Add(reader.ReadLine() ?? "");
+            return lines;
+        }
         catch { return Enumerable.Empty<string>(); }
     }
 

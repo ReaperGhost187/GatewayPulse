@@ -12,15 +12,44 @@ public sealed class GatewayPulseOptions
     public int TrimodeCommandPort { get; set; } = 8510;
     public bool ShowConnectingStations { get; set; } = true;
     public RadioCatOptions RadioCat { get; set; } = new();
+
+    /// <summary>
+    /// Optional live Trimode probing. Both stay OFF by default — TCP :8510 and
+    /// process-memory reads have been observed to hitch/recycle RMS Trimode.
+    /// GP still monitors Trimode via process presence + log/INI reads only.
+    /// </summary>
+    public TrimodeProbeOptions TrimodeProbe { get; set; } = new();
+}
+
+public sealed class TrimodeProbeOptions
+{
+    /// <summary>Send read-only SCAN on the Trimode command port. Default false.</summary>
+    public bool CommandPortEnabled { get; set; }
+
+    /// <summary>Read Trimode process memory for live frequency. Default false.</summary>
+    public bool MemoryReadEnabled { get; set; }
 }
 
 /// <summary>
-/// Optional Hamlib rigctld CAT frequency source for RF transmission logging.
-/// Prefer this over Winlink/Trimode when enabled and reachable.
+/// Optional radio frequency source for dashboard + TX history.
+/// Prefer CI-V COM (CT-17 / USB CI-V) on unattended gateways; rigctld remains available.
 /// </summary>
 public sealed class RadioCatOptions
 {
     public bool Enabled { get; set; }
+
+    /// <summary>CivCom (default) or Rigctld.</summary>
+    public string Mode { get; set; } = "CivCom";
+
+    // --- CI-V serial (CT-17 / second CI-V interface; not Trimode's radio COM) ---
+    public string PortName { get; set; } = "";
+    public int BaudRate { get; set; } = 19200;
+    /// <summary>Icom CI-V address as hex string without 0x (IC-7300 default 94).</summary>
+    public string CivAddress { get; set; } = "94";
+    /// <summary>How often to poll frequency when enabled. Clamped 1–30.</summary>
+    public int PollSeconds { get; set; } = 2;
+
+    // --- Hamlib rigctld (legacy / optional) ---
     public string Host { get; set; } = "127.0.0.1";
     public int Port { get; set; } = 4532;
     public int TimeoutMs { get; set; } = 400;
@@ -122,4 +151,10 @@ public sealed class GatewayStatus
     public List<UptimeMetric> UptimeMetrics { get; set; } = new();
     public List<GatewayEvent> RecentEvents { get; set; } = new();
     public string LastScan { get; set; } = "";
+
+    /// <summary>Dashboard full-status poll interval (seconds), from Dashboard:RefreshSeconds.</summary>
+    public int RefreshSeconds { get; set; } = 5;
+
+    /// <summary>Dashboard live scanner/frequency poll interval (seconds).</summary>
+    public int LiveRadioSeconds { get; set; } = 1;
 }

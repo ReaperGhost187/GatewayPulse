@@ -101,4 +101,66 @@ public static class TrimodeFrequencyHeuristics
 
         return null;
     }
+
+    /// <summary>
+    /// Prefer a scan-list cell that changed between polls (live pointer). Never use LooksLikeArray rows.
+    /// </summary>
+    public static MemoryCandidate? ChooseScanningCandidate(
+        IReadOnlyList<MemoryCandidate> candidates,
+        IntPtr preferredAddress,
+        IntPtr excludeAddress,
+        int? previousHz,
+        IReadOnlyDictionary<long, int>? previousByAddress)
+    {
+        var usable = candidates.Where(c => !c.LooksLikeArray).ToList();
+        if (excludeAddress != IntPtr.Zero)
+        {
+            var withoutExcluded = usable.Where(c => c.Address != excludeAddress).ToList();
+            if (withoutExcluded.Count > 0)
+                usable = withoutExcluded;
+        }
+
+        if (usable.Count == 0)
+            return null;
+
+        if (previousByAddress is { Count: > 0 })
+        {
+            var changing = usable
+                .Where(c =>
+                    previousByAddress.TryGetValue(c.Address.ToInt64(), out var prev) &&
+                    prev != c.Value)
+                .ToList();
+            if (changing.Count == 1)
+                return changing[0];
+            if (changing.Count > 1)
+            {
+                // Prefer the cell that moved away from the previously displayed frequency.
+                if (previousHz is int prevHz)
+                {
+                    var hopped = changing.FirstOrDefault(c => c.Value != prevHz);
+                    if (hopped is not null)
+                        return hopped;
+                }
+
+                return changing[0];
+            }
+        }
+
+        if (preferredAddress != IntPtr.Zero)
+        {
+            var preferred = usable.FirstOrDefault(c => c.Address == preferredAddress);
+            if (preferred is not null)
+                return preferred;
+        }
+
+        if (previousHz is int last && last > 0)
+        {
+            // While scanning, prefer a different channel than the last sticky value when possible.
+            var next = usable.FirstOrDefault(c => c.Value != last);
+            if (next is not null)
+                return next;
+        }
+
+        return usable[0];
+    }
 }

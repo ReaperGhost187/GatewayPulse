@@ -131,6 +131,57 @@ public sealed class TrimodeFrequencyHeuristicsTests
     }
 
     [Fact]
+    public void ChooseScanningCandidate_PrefersAddressThatChanged()
+    {
+        var live = new IntPtr(0x2000);
+        var candidates = new List<MemoryCandidate>
+        {
+            new() { Address = new IntPtr(0x1000), Value = 7_100_000 },
+            new() { Address = live, Value = 10_140_000 },
+            new() { Address = new IntPtr(0x3000), Value = 14_070_000, LooksLikeArray = true }
+        };
+        var previous = new Dictionary<long, int>
+        {
+            [0x1000] = 7_100_000,
+            [0x2000] = 7_185_000
+        };
+
+        var chosen = TrimodeFrequencyHeuristics.ChooseScanningCandidate(
+            candidates,
+            preferredAddress: new IntPtr(0x1000),
+            excludeAddress: IntPtr.Zero,
+            previousHz: 7_185_000,
+            previousByAddress: previous);
+
+        Assert.NotNull(chosen);
+        Assert.Equal(live, chosen!.Address);
+        Assert.Equal(10_140_000, chosen.Value);
+    }
+
+    [Fact]
+    public void ChooseScanningCandidate_ExcludesStagnantAddressAndIgnoresArrays()
+    {
+        var stagnant = new IntPtr(0x1000);
+        var candidates = new List<MemoryCandidate>
+        {
+            new() { Address = stagnant, Value = 9_040_000 },
+            new() { Address = new IntPtr(0x2000), Value = 9_040_000, LooksLikeArray = true },
+            new() { Address = new IntPtr(0x3000), Value = 5_357_000 }
+        };
+
+        var chosen = TrimodeFrequencyHeuristics.ChooseScanningCandidate(
+            candidates,
+            preferredAddress: stagnant,
+            excludeAddress: stagnant,
+            previousHz: 9_040_000,
+            previousByAddress: null);
+
+        Assert.NotNull(chosen);
+        Assert.Equal(new IntPtr(0x3000), chosen!.Address);
+        Assert.Equal(5_357_000, chosen.Value);
+    }
+
+    [Fact]
     public void FrequencySnapshot_NormalizesTrimodeDialSourceToWinlink()
     {
         var now = DateTimeOffset.Parse("2026-08-01T00:00:00Z");

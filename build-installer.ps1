@@ -114,9 +114,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
 
-$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.8.exe
+$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.12.exe
 $Hash = Get-FileHash $Installer.FullName -Algorithm SHA256
-$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.8.sha256.txt'
+$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.12.sha256.txt'
 $ChecksumLine = $Hash.Hash.ToLowerInvariant() + '  ' + $Installer.Name + "`n"
 [System.IO.File]::WriteAllText($ChecksumPath, $ChecksumLine, [System.Text.Encoding]::ASCII)
 $VerifiedHash = (Get-FileHash $Installer.FullName -Algorithm SHA256).Hash

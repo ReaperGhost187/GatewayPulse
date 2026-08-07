@@ -108,6 +108,8 @@ builder.Services.AddSingleton<PushoverService>();
 builder.Services.AddVictronMonitorSupervision(builder.Configuration);
 builder.Services.AddLp100MonitorSupervision(builder.Configuration);
 builder.Services.AddHostedService<RfAnalysisEventBridge>();
+// TrimodeLivePoller intentionally not registered — TCP :8510 / memory probes can recycle Trimode.
+// Re-enable only behind GatewayPulse:TrimodeProbe when explicitly opted in.
 
 var app = builder.Build();
 var appsettingsPath = Path.Combine(builder.Environment.ContentRootPath, "appsettings.json");
@@ -119,7 +121,8 @@ app.Use(async (context, next) =>
     var isSensitiveApi =
         context.Request.Path.StartsWithSegments("/api/settings") ||
         context.Request.Path.StartsWithSegments("/api/testalert") ||
-        context.Request.Path.StartsWithSegments("/api/rf/test-connection");
+        context.Request.Path.StartsWithSegments("/api/rf/test-connection") ||
+        context.Request.Path.StartsWithSegments("/api/radiocat");
     if (isSensitiveApi && !LocalRequestPolicy.IsAllowed(context.Connection.RemoteIpAddress))
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -133,11 +136,92 @@ app.Use(async (context, next) =>
     await next(context);
 });
 
-app.MapGet("/api/status", (GatewayPulseService pulse, Microsoft.Extensions.Options.IOptions<DashboardOptions> dashboard) =>
+app.MapGet("/api/status", (
+    GatewayPulseService pulse,
+    RadioCatFrequencyCache radioCatCache,
+    Microsoft.Extensions.Options.IOptions<DashboardOptions> dashboard) =>
 {
     var status = pulse.GetStatus();
     status.DemoMode = dashboard.Value.DemoMode;
+    status.RefreshSeconds = Math.Clamp(dashboard.Value.RefreshSeconds, 2, 60);
+    status.LiveRadioSeconds = Math.Clamp(dashboard.Value.LiveRadioSeconds, 1, 5);
+
+    // Prefer live CI-V / rigctld over Trimode memory when available.
+    var (catKhz, catSource, catUpdated, catStatus) = radioCatCache.Snapshot();
+    if (catKhz is > 0)
+    {
+        status.CurrentFrequencyKhz = catKhz.Value.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
+        // Dial approx for display (USB/LSB offset not known precisely from CI-V alone).
+        status.DialFrequencyKhz = (catKhz.Value - 1.500m).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
+        status.LiveFrequencySource = string.IsNullOrWhiteSpace(catSource) ? "CI-V" : catSource;
+        status.FrequencyUpdatedAt = catUpdated;
+        status.MemoryReadStatus = catStatus;
+    }
+    else if (!string.IsNullOrWhiteSpace(catStatus) &&
+             !catStatus.Equals("Disabled", StringComparison.OrdinalIgnoreCase))
+    {
+        status.MemoryReadStatus = catStatus;
+    }
+
     return Results.Json(status);
+});
+
+app.MapGet("/api/live-radio", (
+    GatewayPulseService pulse,
+    RadioCatFrequencyCache radioCatCache,
+    Microsoft.Extensions.Options.IOptions<DashboardOptions> dashboard) =>
+{
+    var live = pulse.GetLiveRadioSnapshot();
+    live.DemoMode = dashboard.Value.DemoMode;
+    live.RefreshSeconds = Math.Clamp(dashboard.Value.RefreshSeconds, 2, 60);
+    live.LiveRadioSeconds = Math.Clamp(dashboard.Value.LiveRadioSeconds, 1, 5);
+
+    var (catKhz, catSource, catUpdated, catStatus) = radioCatCache.Snapshot();
+    if (catKhz is > 0)
+    {
+        live.CurrentFrequencyKhz = catKhz.Value.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
+        live.DialFrequencyKhz = (catKhz.Value - 1.500m).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
+        live.LiveFrequencySource = string.IsNullOrWhiteSpace(catSource) ? "CI-V" : catSource;
+        live.FrequencyUpdatedAt = catUpdated;
+        live.MemoryReadStatus = catStatus;
+    }
+
+    return Results.Json(live);
+});
+
+app.MapGet("/api/settings/com-ports", () =>
+{
+    try
+    {
+        var ports = System.IO.Ports.SerialPort.GetPortNames()
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return Results.Json(new { ports });
+    }
+    catch
+    {
+        return Results.Json(new { ports = Array.Empty<string>() });
+    }
+});
+
+app.MapPost("/api/radiocat/test", async (
+    RadioCatFrequencyClient client,
+    RadioCatFrequencyCache cache,
+    CancellationToken cancellationToken) =>
+{
+    var (khz, source, status) = await client.TryGetFrequencyAsync(cancellationToken);
+    if (khz is > 0)
+        cache.Set(khz, source, status);
+    else
+        cache.SetStatus(status);
+
+    return Results.Json(new
+    {
+        ok = khz is > 0,
+        frequencyKhz = khz,
+        source,
+        status
+    });
 });
 
 app.MapGet("/api/power", async (IPowerMonitor powerMonitor, PowerHistoryStore historyStore) =>
@@ -434,6 +518,14 @@ app.MapPost("/api/settings", async (AppSettingsEditModel settings) =>
     if (radioCat.Port <= 0) radioCat.Port = 4532;
     if (radioCat.TimeoutMs < 100) radioCat.TimeoutMs = 400;
     if (string.IsNullOrWhiteSpace(radioCat.Host)) radioCat.Host = "127.0.0.1";
+    if (radioCat.BaudRate <= 0) radioCat.BaudRate = 19200;
+    if (radioCat.PollSeconds < 1) radioCat.PollSeconds = 2;
+    if (radioCat.PollSeconds > 30) radioCat.PollSeconds = 30;
+    if (string.IsNullOrWhiteSpace(radioCat.Mode)) radioCat.Mode = "CivCom";
+    if (string.IsNullOrWhiteSpace(radioCat.CivAddress)) radioCat.CivAddress = "94";
+    radioCat.PortName = (radioCat.PortName ?? "").Trim().ToUpperInvariant();
+    radioCat.CivAddress = radioCat.CivAddress.Trim();
+    radioCat.Mode = radioCat.Mode.Trim();
     gatewayPulse["RadioCat"] = JsonSerializer.SerializeToNode(radioCat, new JsonSerializerOptions
     {
         WriteIndented = true
