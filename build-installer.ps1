@@ -114,8 +114,29 @@ if (Test-Path $PublishedSettings) {
     } else {
         $settingsJson.MobileApi.ApiToken = ""
     }
+    # Fail-closed APNs defaults — never ship Team/Key IDs, .p8 paths, or Enabled=true.
+    if ($null -eq $settingsJson.ApplePush) {
+        $settingsJson | Add-Member -NotePropertyName ApplePush -NotePropertyValue ([pscustomobject]@{
+            Enabled = $false
+            TeamId = ''
+            KeyId = ''
+            PrivateKeyPath = ''
+            BundleId = ''
+            DeviceRegistryPath = 'C:\PWM\MobilePushDevices.json'
+            HistoryPath = 'C:\PWM\MobilePushHistory.json'
+            HistoryCapacity = 200
+            MaxDevices = 50
+            DispatchQueueCapacity = 64
+        }) -Force
+    } else {
+        $settingsJson.ApplePush.Enabled = $false
+        $settingsJson.ApplePush.TeamId = ""
+        $settingsJson.ApplePush.KeyId = ""
+        $settingsJson.ApplePush.PrivateKeyPath = ""
+        $settingsJson.ApplePush.BundleId = ""
+    }
     $settingsJson | ConvertTo-Json -Depth 32 | Set-Content -Path $PublishedSettings -Encoding UTF8
-    Write-Host "Sanitized packaged NetworkMap and MobileApi defaults in Publish\Service\appsettings.json"
+    Write-Host "Sanitized packaged NetworkMap, MobileApi, and ApplePush defaults in Publish\Service\appsettings.json"
 }
 
 Write-Host "Compiling installer..."
@@ -124,9 +145,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
 
-$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.19.exe
+$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.20.exe
 $Hash = Get-FileHash $Installer.FullName -Algorithm SHA256
-$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.19.sha256.txt'
+$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.20.sha256.txt'
 $ChecksumLine = $Hash.Hash.ToLowerInvariant() + '  ' + $Installer.Name + "`n"
 [System.IO.File]::WriteAllText($ChecksumPath, $ChecksumLine, [System.Text.Encoding]::ASCII)
 $VerifiedHash = (Get-FileHash $Installer.FullName -Algorithm SHA256).Hash
