@@ -1,5 +1,5 @@
 #define MyAppName "Gateway Pulse"
-#define MyAppVersion "1.2.18"
+#define MyAppVersion "1.2.19"
 #define MyAppPublisher "Gateway Pulse"
 #define MyServiceName "GatewayPulse"
 
@@ -326,6 +326,10 @@ begin
   Result := FileExists(ExpandConstant('{app}\Tray\GatewayPulse.Tray.exe'));
 end;
 
+// Intentionally not called from [Run]. The lp100 task only copies the collector EXE
+// ("disabled until configured"). Auto-running -Disable when the task is unchecked
+// would wipe an already-enabled production Lp100Monitor on upgrade. Operators enable
+// LP-100 via Settings UI or configure-lp100.ps1 -Enable after install.
 procedure ConfigureLp100Settings;
 var
   Parameters: String;

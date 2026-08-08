@@ -19,6 +19,17 @@ function Normalize-SerialPortName {
     return $trimmed
 }
 
+function Set-JsonNoteProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Value
+    )
+    # PowerShell ConvertFrom-Json objects reject assignment of missing properties.
+    # Always Add-Member -Force so old/partial production appsettings still configure cleanly.
+    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+}
+
 if (-not $AppSettingsPath) {
     $AppSettingsPath = Join-Path $PSScriptRoot "appsettings.json"
 }
@@ -29,30 +40,59 @@ if (-not (Test-Path $AppSettingsPath)) {
 New-Item -ItemType Directory -Force -Path "C:\PWM" | Out-Null
 New-Item -ItemType Directory -Force -Path "C:\PWM\logs" | Out-Null
 
-$json = Get-Content $AppSettingsPath -Raw | ConvertFrom-Json
-if (-not $json.Lp100Monitor) { $json | Add-Member -NotePropertyName Lp100Monitor -NotePropertyValue ([pscustomobject]@{}) }
-if (-not $json.RfMonitoring) { $json | Add-Member -NotePropertyName RfMonitoring -NotePropertyValue ([pscustomobject]@{}) }
+$configurationAcl = Get-Acl -LiteralPath $AppSettingsPath
+$json = Get-Content -LiteralPath $AppSettingsPath -Raw | ConvertFrom-Json
+if ($null -eq $json.Lp100Monitor) {
+    $json | Add-Member -NotePropertyName Lp100Monitor -NotePropertyValue ([pscustomobject]@{}) -Force
+}
+if ($null -eq $json.RfMonitoring) {
+    $json | Add-Member -NotePropertyName RfMonitoring -NotePropertyValue ([pscustomobject]@{}) -Force
+}
 
-$json.Lp100Monitor.ExecutablePath = "Lp100Monitor\GatewayPulse.Lp100Monitor.exe"
-$json.Lp100Monitor.OutputPath = "C:\PWM\RfTelemetry.json"
-$json.Lp100Monitor.LogsPath = "C:\PWM\logs"
-$json.Lp100Monitor.BaudRate = $BaudRate
-$json.Lp100Monitor.IntervalMs = 250
-$json.Lp100Monitor.IdleIntervalMs = 1000
-$json.Lp100Monitor.RestartDelaySeconds = 10
-$json.Lp100Monitor.HistoryEnabled = $true
-if ($PSBoundParameters.ContainsKey("Port")) { $json.Lp100Monitor.Port = (Normalize-SerialPortName $Port) }
-if ($AutoDetect) { $json.Lp100Monitor.AutoDetect = $true }
-if ($Disable) { $json.Lp100Monitor.Enabled = $false }
-elseif ($Enable) { $json.Lp100Monitor.Enabled = $true }
+$lp100 = $json.Lp100Monitor
+Set-JsonNoteProperty $lp100 'ExecutablePath' "Lp100Monitor\GatewayPulse.Lp100Monitor.exe"
+Set-JsonNoteProperty $lp100 'OutputPath' "C:\PWM\RfTelemetry.json"
+Set-JsonNoteProperty $lp100 'LogsPath' "C:\PWM\logs"
+Set-JsonNoteProperty $lp100 'BaudRate' $BaudRate
+# Match service/UI default (PACTOR snapshot cadence). Do not regress to 250 ms.
+Set-JsonNoteProperty $lp100 'IntervalMs' 80
+Set-JsonNoteProperty $lp100 'IdleIntervalMs' 1000
+Set-JsonNoteProperty $lp100 'RestartDelaySeconds' 10
+Set-JsonNoteProperty $lp100 'HistoryEnabled' $true
+if ($PSBoundParameters.ContainsKey("Port")) {
+    Set-JsonNoteProperty $lp100 'Port' (Normalize-SerialPortName $Port)
+}
+if ($AutoDetect) {
+    Set-JsonNoteProperty $lp100 'AutoDetect' $true
+}
+if ($Disable) {
+    Set-JsonNoteProperty $lp100 'Enabled' $false
+}
+elseif ($Enable) {
+    Set-JsonNoteProperty $lp100 'Enabled' $true
+}
 
-$json.RfMonitoring.TelemetryPath = "C:\PWM\RfTelemetry.json"
-$json.RfMonitoring.HistoryPath = "C:\PWM\RfHistory.json"
-$json.RfMonitoring.TransmissionHistoryPath = "C:\PWM\RfTransmissionHistory.json"
-$json.RfMonitoring.HistorySampleSeconds = 5
-$json.RfMonitoring.StaleAfterSeconds = 10
+$rf = $json.RfMonitoring
+Set-JsonNoteProperty $rf 'TelemetryPath' "C:\PWM\RfTelemetry.json"
+Set-JsonNoteProperty $rf 'HistoryPath' "C:\PWM\RfHistory.json"
+Set-JsonNoteProperty $rf 'AnalysisPath' "C:\PWM\RfAnalysis.json"
+Set-JsonNoteProperty $rf 'SwrByFrequencyPath' "C:\PWM\RfSwrByFrequency.json"
+Set-JsonNoteProperty $rf 'TransmissionHistoryPath' "C:\PWM\RfTransmissionHistory.json"
+Set-JsonNoteProperty $rf 'HistorySampleSeconds' 5
+Set-JsonNoteProperty $rf 'StaleAfterSeconds' 10
 
-$json | ConvertTo-Json -Depth 32 | Set-Content -Path $AppSettingsPath -Encoding UTF8
+# Atomic write; never touch GatewayPulse.RadioCat / VictronMonitor / other siblings beyond Lp100+Rf paths above.
+$temporaryPath = "$AppSettingsPath.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+try {
+    $json | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+    Set-Acl -LiteralPath $temporaryPath -AclObject $configurationAcl
+    Move-Item -LiteralPath $temporaryPath -Destination $AppSettingsPath -Force
+    Set-Acl -LiteralPath $AppSettingsPath -AclObject $configurationAcl
+}
+finally {
+    Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host "Gateway Pulse LP-100A configuration updated."
-Write-Host "Enabled: $($json.Lp100Monitor.Enabled)  Port: $($json.Lp100Monitor.Port)  Baud: $($json.Lp100Monitor.BaudRate)"
+Write-Host "Enabled: $($lp100.Enabled)  Port: $($lp100.Port)  Baud: $($lp100.BaudRate)"
 Write-Host "Telemetry: C:\PWM\RfTelemetry.json"

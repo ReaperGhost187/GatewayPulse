@@ -34,6 +34,11 @@ Write-Host "Running multi-device configuration and ACL tests..."
 if ($LASTEXITCODE -ne 0) {
     throw "Configuration tests failed with exit code $LASTEXITCODE."
 }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `
+    .\GatewayPulse.VictronMonitor.Tests\verify-configure-lp100.ps1
+if ($LASTEXITCODE -ne 0) {
+    throw "LP-100 configure script tests failed with exit code $LASTEXITCODE."
+}
 
 Remove-Item .\Publish\Service -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item .\Publish\Tray -Recurse -Force -ErrorAction SilentlyContinue
@@ -119,9 +124,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
 
-$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.18.exe
+$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.19.exe
 $Hash = Get-FileHash $Installer.FullName -Algorithm SHA256
-$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.18.sha256.txt'
+$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.19.sha256.txt'
 $ChecksumLine = $Hash.Hash.ToLowerInvariant() + '  ' + $Installer.Name + "`n"
 [System.IO.File]::WriteAllText($ChecksumPath, $ChecksumLine, [System.Text.Encoding]::ASCII)
 $VerifiedHash = (Get-FileHash $Installer.FullName -Algorithm SHA256).Hash
