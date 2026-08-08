@@ -201,23 +201,19 @@ public sealed class GatewayPulseService
         }
     }
 
-    private void ApplyProbeDisabledScannerStatus(GatewayStatus status)
+    internal void ApplyProbeDisabledScannerStatus(GatewayStatus status)
     {
         status.CommandPortStatus = "Disabled (TrimodeProbe.CommandPortEnabled=false)";
 
-        // Trimode SCAN probe is off — do not imply a Trimode scanner fault.
-        // When RadioCat/CI-V is the live-frequency path, report that calmly.
-        var radioCat = _options.CurrentValue.RadioCat;
-        if (radioCat?.Enabled == true)
+        if (!status.TrimodeSeen)
         {
-            status.ScannerEnabled = true;
-            var mode = radioCat.Mode ?? "";
-            status.ScannerStatus = mode.Equals("Rigctld", StringComparison.OrdinalIgnoreCase)
-                ? "Via CAT"
-                : "Via CI-V";
+            status.ScannerEnabled = false;
+            status.ScannerStatus = "Trimode offline";
             return;
         }
 
+        // RadioCat/CI-V observes frequency only. With the SCAN probe disabled,
+        // scanner state is unavailable even when CAT frequency is live.
         status.ScannerEnabled = null;
         status.ScannerStatus = "Not probed";
     }
@@ -239,7 +235,7 @@ public sealed class GatewayPulseService
             return SnapshotLiveRadio(_status);
     }
 
-    private static GatewayStatus SnapshotLiveRadio(GatewayStatus status) => new()
+    internal static GatewayStatus SnapshotLiveRadio(GatewayStatus status) => new()
     {
         TrimodeSeen = status.TrimodeSeen,
         ScannerEnabled = status.ScannerEnabled,
@@ -315,7 +311,7 @@ public sealed class GatewayPulseService
             problems.Add("RMS Trimode is offline");
 
         // ScannerStopped uses ScannerEnabled from Trimode SCAN / probe path only — never ScanChannels[].Active.
-        if (alerts.ScannerStopped && status.TrimodeSeen && status.ScannerEnabled == false)
+        if (alerts.ScannerStopped && IsAuthoritativeScannerStopped(status))
             problems.Add("Scanner is stopped");
 
         var currentStateKey = problems.Count == 0
@@ -369,6 +365,9 @@ public sealed class GatewayPulseService
             });
         }
     }
+
+    internal static bool IsAuthoritativeScannerStopped(GatewayStatus status) =>
+        status.TrimodeSeen && status.ScannerEnabled == false;
 
     private void EvaluateStationAlert(GatewayStatus status)
     {
@@ -806,11 +805,12 @@ public sealed class GatewayPulseService
     {
         if (!status.TrimodeSeen)
         {
-            status.ScannerEnabled = null;
-            status.ScannerStatus = "Trimode Offline";
+            status.ScannerEnabled = false;
+            status.ScannerStatus = "Trimode offline";
             status.CommandPortStatus = "Trimode offline";
             _lastKnownScannerEnabled = null;
             _lastScannerOkUtc = DateTime.MinValue;
+            _lastScannerAttemptUtc = DateTime.MinValue;
             return;
         }
 
