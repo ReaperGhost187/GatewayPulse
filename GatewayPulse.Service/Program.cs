@@ -124,7 +124,7 @@ app.Use(async (context, next) =>
         context.Request.Path.StartsWithSegments("/api/testalert") ||
         context.Request.Path.StartsWithSegments("/api/rf/test-connection") ||
         context.Request.Path.StartsWithSegments("/api/radiocat");
-    if (isSensitiveApi && !LocalRequestPolicy.IsAllowed(context.Connection.RemoteIpAddress))
+    if (isSensitiveApi && !LocalRequestPolicy.IsAllowed(context.Connection))
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         await context.Response.WriteAsJsonAsync(new

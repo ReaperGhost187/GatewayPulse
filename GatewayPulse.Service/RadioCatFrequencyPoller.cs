@@ -14,6 +14,10 @@ public sealed class RadioCatFrequencyPoller(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Yield immediately so hosted-service StartAsync cannot block Kestrel bind
+        // on a synchronous CI-V COM open during Windows service startup.
+        await Task.Yield();
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var cat = options.CurrentValue.RadioCat ?? new RadioCatOptions();

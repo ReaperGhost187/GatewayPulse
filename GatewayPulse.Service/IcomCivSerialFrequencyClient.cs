@@ -26,8 +26,25 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
         var timeout = Math.Clamp(cat.TimeoutMs, 100, 2000);
         var portName = cat.PortName.Trim().ToUpperInvariant();
 
+        // SerialPort.Open/Read are synchronous and can stall on bad drivers.
+        // Always hop to the thread pool so BackgroundService.StartAsync / Kestrel
+        // startup cannot be blocked before the first await.
+        return Task.Run(
+            () => ReadFrequency(portName, baud, timeout, radioAddress, cancellationToken),
+            cancellationToken);
+    }
+
+    private static (decimal? FrequencyKhz, string Status) ReadFrequency(
+        string portName,
+        int baud,
+        int timeout,
+        byte radioAddress,
+        CancellationToken cancellationToken)
+    {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             using var port = new SerialPort(portName, baud, Parity.None, 8, StopBits.One)
             {
                 ReadTimeout = timeout,
@@ -64,7 +81,7 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
                     if (IcomCivFrequencyCodec.TryDecodeFrequencyHz(buffer.AsSpan(0, total), radioAddress, out var hz))
                     {
                         var khz = hz / 1000m;
-                        return Task.FromResult<(decimal?, string)>((khz, $"OK {portName} @ {baud}"));
+                        return (khz, $"OK {portName} @ {baud}");
                     }
                 }
                 catch (TimeoutException)
@@ -73,7 +90,7 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
                 }
             }
 
-            return Task.FromResult<(decimal?, string)>((null, $"No CI-V frequency reply on {portName}"));
+            return (null, $"No CI-V frequency reply on {portName}");
         }
         catch (OperationCanceledException)
         {
@@ -81,7 +98,7 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
         }
         catch (Exception ex)
         {
-            return Task.FromResult<(decimal?, string)>((null, "CI-V error: " + ex.GetType().Name));
+            return (null, "CI-V error: " + ex.GetType().Name);
         }
     }
 }

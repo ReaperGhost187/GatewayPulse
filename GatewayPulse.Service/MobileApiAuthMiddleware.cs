@@ -26,7 +26,7 @@ public sealed class MobileApiAuthMiddleware
             return;
         }
 
-        if (LocalRequestPolicy.IsAllowed(context.Connection.RemoteIpAddress))
+        if (LocalRequestPolicy.IsAllowed(context.Connection))
         {
             await _next(context);
             return;
