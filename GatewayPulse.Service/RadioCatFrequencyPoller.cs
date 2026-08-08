@@ -11,6 +11,7 @@ namespace GatewayPulse.ServiceHosting;
 public sealed class RadioCatFrequencyPoller(
     RadioCatFrequencyClient client,
     RadioCatFrequencyCache cache,
+    GatewayPulseService gatewayPulse,
     IOptionsMonitor<GatewayPulseOptions> options,
     IHostApplicationLifetime lifetime,
     ILogger<RadioCatFrequencyPoller> logger) : BackgroundService
@@ -44,7 +45,9 @@ public sealed class RadioCatFrequencyPoller(
                     try
                     {
                         var (khz, source, status) = await client.TryGetFrequencyAsync(stoppingToken);
-                        cache.Set(khz, source, status);
+                        var updatedAt = cache.Set(khz, source, status);
+                        if (khz is > 0 && updatedAt.HasValue)
+                            gatewayPulse.ObserveRadioCatFrequency(khz.Value, updatedAt.Value);
                         if (khz is null or <= 0)
                         {
                             logger.LogWarning(

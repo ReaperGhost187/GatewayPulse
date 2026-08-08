@@ -9,7 +9,7 @@ public sealed class RadioCatFrequencyCache
     private DateTimeOffset? _updatedAt;
     private string _status = "Disabled";
 
-    public void Set(decimal? frequencyKhz, string source, string status)
+    public DateTimeOffset? Set(decimal? frequencyKhz, string source, string status)
     {
         lock (_lock)
         {
@@ -17,6 +17,7 @@ public sealed class RadioCatFrequencyCache
             _source = string.IsNullOrWhiteSpace(source) ? "Unknown" : source;
             _updatedAt = _frequencyKhz is > 0 ? DateTimeOffset.UtcNow : _updatedAt;
             _status = status;
+            return _frequencyKhz is > 0 ? _updatedAt : null;
         }
     }
 

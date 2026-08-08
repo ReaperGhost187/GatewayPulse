@@ -42,6 +42,7 @@ public sealed class GatewayPulseService
     private ScannerLogObservation? _lastLogScannerObservation;
     private DateTime? _trimodeLogSessionStartedAt;
     private DateTime _lastIniParseUtc = DateTime.MinValue;
+    private readonly CatScanMotionTracker _catScanMotion = new();
 
     /// <summary>Consecutive memory-read misses before clearing TX observation (avoids flicker).</summary>
     private const int FrequencyMissGracePolls = 2;
@@ -226,15 +227,61 @@ public sealed class GatewayPulseService
     internal void ApplyProbeDisabledScannerStatus(GatewayStatus status)
     {
         status.CommandPortStatus = "Disabled (TrimodeProbe.CommandPortEnabled=false)";
+        _catScanMotion.SynchronizeChannels(status.ScanChannels);
 
         if (!status.TrimodeSeen)
         {
+            _catScanMotion.Reset();
             status.ScannerEnabled = false;
             status.ScannerStatus = "Trimode offline";
             return;
         }
 
+        if (_lastLogScannerObservation is { Enabled: false, Source: "Scanning suspended" } &&
+            _catScanMotion.Recovered)
+        {
+            status.ScannerEnabled = true;
+            status.ScannerStatus = "Scanning";
+            return;
+        }
+
         ApplyLogScannerObservation(status, _lastLogScannerObservation);
+    }
+
+    /// <summary>
+    /// Observes the successful sample already placed in the RadioCat cache. This never reads
+    /// CAT/CI-V itself and is intentionally gated on an authoritative suspended log event.
+    /// </summary>
+    public void ObserveRadioCatFrequency(
+        decimal frequencyKhz,
+        DateTimeOffset observedAt)
+    {
+        lock (_lock)
+        {
+            _catScanMotion.SynchronizeChannels(_status.ScanChannels);
+
+            if (!_status.TrimodeSeen)
+            {
+                _catScanMotion.Reset();
+                return;
+            }
+
+            if (_lastLogScannerObservation is not { Enabled: false, Source: "Scanning suspended" })
+                return;
+
+            if (!_catScanMotion.Observe(
+                    frequencyKhz,
+                    observedAt,
+                    _status.ScanChannels,
+                    DateTimeOffset.UtcNow))
+                return;
+
+            _status.ScannerEnabled = true;
+            _status.ScannerStatus = "Scanning";
+            _status.Healthy =
+                _status.RelayRunning == true &&
+                _status.TrimodeSeen;
+        }
     }
 
     private void UpdateLogScannerObservation(
@@ -246,6 +293,7 @@ public sealed class GatewayPulseService
         {
             _trimodeLogSessionStartedAt = null;
             _lastLogScannerObservation = null;
+            _catScanMotion.Reset();
             return;
         }
 
@@ -253,10 +301,15 @@ public sealed class GatewayPulseService
         {
             _trimodeLogSessionStartedAt = sessionStartedAt;
             _lastLogScannerObservation = null;
+            _catScanMotion.Reset();
         }
 
         if (observation.HasValue)
+        {
+            if (_lastLogScannerObservation != observation)
+                _catScanMotion.Reset();
             _lastLogScannerObservation = observation;
+        }
     }
 
     internal static void ApplyLogScannerObservation(
@@ -375,7 +428,8 @@ public sealed class GatewayPulseService
         if (alerts.TrimodeOffline && !status.TrimodeSeen)
             problems.Add("RMS Trimode is offline");
 
-        // ScannerStopped uses authoritative Trimode log / SCAN-probe state only — never ScanChannels[].Active.
+        // ScannerStopped uses authoritative state (log/SCAN probe, with conservative CAT
+        // motion recovery after a logged stop) — never ScanChannels[].Active.
         if (alerts.ScannerStopped && IsAuthoritativeScannerStopped(status))
             problems.Add("Scanner is stopped");
 
