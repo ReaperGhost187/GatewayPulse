@@ -26,12 +26,12 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
         var timeout = Math.Clamp(cat.TimeoutMs, 100, 2000);
         var portName = cat.PortName.Trim().ToUpperInvariant();
 
-        // SerialPort.Open/Read are synchronous and can stall on bad drivers.
-        // Always hop to the thread pool so BackgroundService.StartAsync / Kestrel
-        // startup cannot be blocked before the first await.
+        // SerialPort.Open/Read are synchronous and can stall on bad drivers / missing ports
+        // under a service account. Always hop off the caller so hosted-service StartAsync
+        // and request threads cannot block. Open itself is also hard-timeout capped.
         return Task.Run(
             () => ReadFrequency(portName, baud, timeout, radioAddress, cancellationToken),
-            cancellationToken);
+            CancellationToken.None);
     }
 
     private static (decimal? FrequencyKhz, string Status) ReadFrequency(
@@ -41,11 +41,12 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
         byte radioAddress,
         CancellationToken cancellationToken)
     {
+        SerialPort? port = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            using var port = new SerialPort(portName, baud, Parity.None, 8, StopBits.One)
+            port = new SerialPort(portName, baud, Parity.None, 8, StopBits.One)
             {
                 ReadTimeout = timeout,
                 WriteTimeout = timeout,
@@ -53,7 +54,11 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
                 DtrEnable = true,
                 RtsEnable = true
             };
-            port.Open();
+
+            var openError = OpenWithTimeout(port, timeout, cancellationToken);
+            if (openError is not null)
+                return (null, openError);
+
             // Drain stale bytes.
             try { port.DiscardInBuffer(); } catch { /* ignore */ }
 
@@ -99,6 +104,85 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
         catch (Exception ex)
         {
             return (null, "CI-V error: " + ex.GetType().Name);
+        }
+        finally
+        {
+            TryDisposePort(port);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="SerialPort.Open"/> can hang indefinitely on some USB-serial stacks.
+    /// Cap wait time so the poller can report failure and keep the host healthy.
+    /// </summary>
+    private static string? OpenWithTimeout(SerialPort port, int timeoutMs, CancellationToken cancellationToken)
+    {
+        Exception? openEx = null;
+        var opened = false;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                port.Open();
+                opened = true;
+            }
+            catch (Exception ex)
+            {
+                openEx = ex;
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "GatewayPulse-CI-V-Open"
+        };
+
+        thread.Start();
+        var remaining = Math.Max(100, timeoutMs);
+        while (remaining > 0)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                return "CI-V cancelled";
+
+            if (thread.Join(50))
+                break;
+
+            remaining -= 50;
+        }
+
+        if (thread.IsAlive)
+            return $"CI-V open timeout on {port.PortName}";
+
+        if (openEx is not null)
+            return "CI-V error: " + openEx.GetType().Name;
+
+        if (!opened || !port.IsOpen)
+            return $"CI-V open failed on {port.PortName}";
+
+        return null;
+    }
+
+    private static void TryDisposePort(SerialPort? port)
+    {
+        if (port is null)
+            return;
+
+        try
+        {
+            if (port.IsOpen)
+                port.Close();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            port.Dispose();
+        }
+        catch
+        {
+            // ignore — Open may still be wedged on a background thread
         }
     }
 }

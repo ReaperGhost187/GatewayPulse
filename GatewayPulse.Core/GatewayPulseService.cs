@@ -56,7 +56,9 @@ public sealed class GatewayPulseService
         _options = options;
         _alerts = alerts;
         _pushover = pushover;
-        _ = GetStatus();
+        // Warm caches, but never let a log/INI parse failure kill DI / host start.
+        try { _ = GetStatus(); }
+        catch { /* first request will retry */ }
     }
 
     public GatewayStatus GetStatus()

@@ -193,6 +193,9 @@ public sealed class VictronMonitorSupervisor(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Never block hosted-service StartAsync / Kestrel with sync launch work.
+        await Task.Yield();
+
         if (!_options.Enabled && !_demoMode)
         {
             logger.LogInformation("Victron monitor supervision is disabled.");
@@ -217,7 +220,6 @@ public sealed class VictronMonitorSupervisor(
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            await Task.Yield();
             IVictronMonitorProcess? process = null;
             try
             {

@@ -14,6 +14,19 @@ builder.Host.UseWindowsService(options =>
     options.ServiceName = "GatewayPulse";
 });
 
+// A single BackgroundService fault must never take down Kestrel / the Windows service.
+// RadioCat CI-V COM hangs and collector supervisor errors are recovered in-process.
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+});
+
+// Upgrade installs preserve existing appsettings.json. If an older file lost `urls`,
+// still bind the dashboard on 8080 so tray health checks keep working.
+var configuredUrls = builder.Configuration["urls"] ?? builder.Configuration["Urls"];
+if (string.IsNullOrWhiteSpace(configuredUrls))
+    builder.WebHost.UseUrls("http://0.0.0.0:8080");
+
 builder.Services.Configure<GatewayPulseOptions>(builder.Configuration.GetSection("GatewayPulse"));
 builder.Services.Configure<PushoverOptions>(builder.Configuration.GetSection("Pushover"));
 builder.Services.Configure<AlertOptions>(builder.Configuration.GetSection("Alerts"));

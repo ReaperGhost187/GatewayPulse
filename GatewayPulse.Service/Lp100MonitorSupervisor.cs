@@ -164,6 +164,9 @@ public sealed class Lp100MonitorSupervisor(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Never block hosted-service StartAsync / Kestrel with sync Process.Start work.
+        await Task.Yield();
+
         var demoMode = dashboardOptions.Value.DemoMode;
         while (!stoppingToken.IsCancellationRequested)
         {
