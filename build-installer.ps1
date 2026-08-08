@@ -104,8 +104,13 @@ if (Test-Path $PublishedSettings) {
         $settingsJson.NetworkMap.AutoRefreshMinutes = 15
         $settingsJson.NetworkMap.MapUrl = "https://cms.winlink.org:444/maps/WinlinkGateways.aspx"
     }
+    if ($null -eq $settingsJson.MobileApi) {
+        $settingsJson | Add-Member -NotePropertyName MobileApi -NotePropertyValue ([pscustomobject]@{ ApiToken = '' }) -Force
+    } else {
+        $settingsJson.MobileApi.ApiToken = ""
+    }
     $settingsJson | ConvertTo-Json -Depth 32 | Set-Content -Path $PublishedSettings -Encoding UTF8
-    Write-Host "Sanitized packaged NetworkMap defaults in Publish\Service\appsettings.json"
+    Write-Host "Sanitized packaged NetworkMap and MobileApi defaults in Publish\Service\appsettings.json"
 }
 
 Write-Host "Compiling installer..."
@@ -114,9 +119,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
 
-$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.12.exe
+$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.14.exe
 $Hash = Get-FileHash $Installer.FullName -Algorithm SHA256
-$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.12.sha256.txt'
+$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.14.sha256.txt'
 $ChecksumLine = $Hash.Hash.ToLowerInvariant() + '  ' + $Installer.Name + "`n"
 [System.IO.File]::WriteAllText($ChecksumPath, $ChecksumLine, [System.Text.Encoding]::ASCII)
 $VerifiedHash = (Get-FileHash $Installer.FullName -Algorithm SHA256).Hash

@@ -866,7 +866,9 @@
 <script>
 let refreshInFlight = false;
 let rfRefreshInFlight = false;
+let liveRadioInFlight = false;
 let refreshSeconds = 5;
+let liveRadioSeconds = 2;
 let statusRefreshTimer = null;
 let liveRadioTimer = null;
 let batteryMetric = 'soc';
@@ -953,6 +955,8 @@ async function refreshCore(){
 
   if(typeof s.refreshSeconds === 'number' && s.refreshSeconds >= 2)
     refreshSeconds = s.refreshSeconds;
+  if(typeof s.liveRadioSeconds === 'number' && s.liveRadioSeconds >= 1)
+    liveRadioSeconds = s.liveRadioSeconds;
   scheduleDashboardTimers();
 
   document.getElementById('sfi').textContent = s.lastSfi ?? '--';
@@ -1315,14 +1319,35 @@ function renderScanChannels(scanChannels){
   }
 }
 
+async function refreshLiveRadio(){
+  if(liveRadioInFlight) return;
+  liveRadioInFlight = true;
+  try{
+    const s = await fetchJson('/api/live-radio');
+    applyLiveRadioFields(s);
+    if(typeof s.liveRadioSeconds === 'number' && s.liveRadioSeconds >= 1){
+      const next = Math.max(1, Math.min(5, s.liveRadioSeconds));
+      if(next !== liveRadioSeconds){
+        liveRadioSeconds = next;
+        scheduleDashboardTimers();
+      }
+    }
+  }
+  catch{
+    // Keep last frequency on transient live-radio failures.
+  }
+  finally{
+    liveRadioInFlight = false;
+  }
+}
+
 function scheduleDashboardTimers(){
   if(statusRefreshTimer) clearInterval(statusRefreshTimer);
-  if(liveRadioTimer){
-    clearInterval(liveRadioTimer);
-    liveRadioTimer = null;
-  }
+  if(liveRadioTimer) clearInterval(liveRadioTimer);
   statusRefreshTimer = setInterval(refresh, Math.max(2, refreshSeconds) * 1000);
-  // Live-radio polling disabled: Trimode TCP/memory probes are off by default.
+  // Light path: reads RadioCat CI-V cache (and Trimode snapshot if probes enabled).
+  // Does not open the CI-V COM port or enable Trimode TCP/memory probes.
+  liveRadioTimer = setInterval(refreshLiveRadio, Math.max(1, Math.min(5, liveRadioSeconds)) * 1000);
 }
 
 refresh();

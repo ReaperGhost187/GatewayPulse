@@ -82,7 +82,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1
 The build runs Release .NET tests, Power System JavaScript state tests, multi-device configuration/ACL tests, four self-contained Windows publishes (service, tray, Victron, LP-100A), and Inno Setup compilation. Output:
 
 ```text
-Installer_Output\GatewayPulseSetup_v1.2.12.exe
+Installer_Output\GatewayPulseSetup_v1.2.14.exe
 ```
 
 ## Documentation

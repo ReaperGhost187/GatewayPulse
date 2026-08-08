@@ -19,6 +19,7 @@ builder.Services.Configure<PushoverOptions>(builder.Configuration.GetSection("Pu
 builder.Services.Configure<AlertOptions>(builder.Configuration.GetSection("Alerts"));
 builder.Services.Configure<DashboardOptions>(builder.Configuration.GetSection("Dashboard"));
 builder.Services.Configure<NetworkMapOptions>(builder.Configuration.GetSection("NetworkMap"));
+builder.Services.AddMobileApiAuth(builder.Configuration);
 
 var demoMode = builder.Configuration.GetValue("Dashboard:DemoMode", false);
 var configuredTelemetryPath = builder.Configuration["PowerMonitoring:TelemetryPath"] ?? "PowerTelemetry.json";
@@ -134,6 +135,20 @@ app.Use(async (context, next) =>
     }
 
     await next(context);
+});
+app.UseMobileApiAuth();
+
+app.MapGet("/api/mobile/hello", (Microsoft.Extensions.Options.IOptions<GatewayPulseOptions> gatewayOptions) =>
+{
+    var options = gatewayOptions.Value;
+    return Results.Json(new
+    {
+        ok = true,
+        service = "GatewayPulse",
+        gatewayName = options.GatewayName,
+        callsign = options.Callsign,
+        apiVersion = MobileApiConstants.ApiVersion
+    });
 });
 
 app.MapGet("/api/status", (
