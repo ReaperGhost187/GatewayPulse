@@ -33,6 +33,7 @@ builder.Services.Configure<AlertOptions>(builder.Configuration.GetSection("Alert
 builder.Services.Configure<DashboardOptions>(builder.Configuration.GetSection("Dashboard"));
 builder.Services.Configure<NetworkMapOptions>(builder.Configuration.GetSection("NetworkMap"));
 builder.Services.AddMobileApiAuth(builder.Configuration);
+builder.Services.AddMobilePush(builder.Configuration);
 
 var demoMode = builder.Configuration.GetValue("Dashboard:DemoMode", false);
 var configuredTelemetryPath = builder.Configuration["PowerMonitoring:TelemetryPath"] ?? "PowerTelemetry.json";
@@ -163,6 +164,8 @@ app.MapGet("/api/mobile/hello", (Microsoft.Extensions.Options.IOptions<GatewayPu
         apiVersion = MobileApiConstants.ApiVersion
     });
 });
+
+app.MapMobilePushEndpoints();
 
 app.MapGet("/api/status", (
     GatewayPulseService pulse,

@@ -3,9 +3,15 @@ using Microsoft.Extensions.Options;
 namespace GatewayPulse.ServiceHosting;
 
 /// <summary>
-/// Requires a valid Bearer token for remote (non-loopback) GET access to read-only
-/// telemetry APIs. Loopback requests always bypass so the local Windows dashboard
-/// and internal GatewayPulse components keep working without a token.
+/// Requires a valid Bearer token for remote (non-loopback) access to protected APIs.
+/// Loopback requests always bypass so the local Windows dashboard and internal
+/// GatewayPulse components keep working without a token.
+///
+/// Auth method policy (documented choice):
+/// - <c>/api/mobile/*</c>: ALL methods require Bearer when remote (device registration writes).
+/// - Other telemetry paths (<c>/api/status</c>, power, rf, …): GET only (unchanged).
+/// - Admin routes (<c>/api/settings</c>, <c>/api/testalert</c>, <c>/api/radiocat</c>,
+///   <c>/api/rf/test-connection</c>) stay loopback-only via separate middleware — not opened here.
 /// </summary>
 public sealed class MobileApiAuthMiddleware
 {
@@ -20,7 +26,7 @@ public sealed class MobileApiAuthMiddleware
 
     public async Task InvokeAsync(HttpContext context, IMobileApiTokenValidator tokenValidator)
     {
-        if (!HttpMethods.IsGet(context.Request.Method) || !IsProtectedPath(context.Request.Path))
+        if (!RequiresAuth(context.Request.Method, context.Request.Path))
         {
             await _next(context);
             return;
@@ -40,8 +46,9 @@ public sealed class MobileApiAuthMiddleware
         }
 
         _logger.LogWarning(
-            "Mobile API auth rejected: path={Path} ip={Ip} reason={Reason}",
+            "Mobile API auth rejected: path={Path} method={Method} ip={Ip} reason={Reason}",
             context.Request.Path.Value,
+            context.Request.Method,
             context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             reason);
 
@@ -51,7 +58,7 @@ public sealed class MobileApiAuthMiddleware
     }
 
     /// <summary>
-    /// Read-only telemetry/mobile paths that require Bearer auth when the caller is not loopback.
+    /// Paths that require Bearer auth when the caller is not loopback.
     /// Sensitive write/settings routes stay loopback-only via <see cref="LocalRequestPolicy"/>.
     /// </summary>
     public static bool IsProtectedPath(PathString path) =>
@@ -62,6 +69,20 @@ public sealed class MobileApiAuthMiddleware
         path.StartsWithSegments("/api/preferences") ||
         path.StartsWithSegments("/api/network-map") ||
         path.StartsWithSegments("/api/mobile");
+
+    public static bool IsMobileApiPath(PathString path) =>
+        path.StartsWithSegments("/api/mobile");
+
+    /// <summary>
+    /// Mobile device APIs authenticate all methods remotely; other telemetry paths stay GET-only.
+    /// </summary>
+    public static bool RequiresAuth(string method, PathString path)
+    {
+        if (IsMobileApiPath(path))
+            return true;
+
+        return HttpMethods.IsGet(method) && IsProtectedPath(path);
+    }
 
     public static string? EvaluateRemoteAuth(HttpContext context, IMobileApiTokenValidator tokenValidator)
     {

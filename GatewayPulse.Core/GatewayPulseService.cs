@@ -12,6 +12,7 @@ public sealed class GatewayPulseService
     private readonly IOptionsMonitor<GatewayPulseOptions> _options;
     private readonly IOptionsMonitor<AlertOptions> _alerts;
     private readonly PushoverService _pushover;
+    private readonly IMobileAlertPublisher _mobileAlerts;
     private readonly object _lock = new();
 
     private GatewayStatus _status = new();
@@ -51,11 +52,13 @@ public sealed class GatewayPulseService
     public GatewayPulseService(
         IOptionsMonitor<GatewayPulseOptions> options,
         IOptionsMonitor<AlertOptions> alerts,
-        PushoverService pushover)
+        PushoverService pushover,
+        IMobileAlertPublisher? mobileAlerts = null)
     {
         _options = options;
         _alerts = alerts;
         _pushover = pushover;
+        _mobileAlerts = mobileAlerts ?? NullMobileAlertPublisher.Instance;
         // Warm caches, but never let a log/INI parse failure kill DI / host start.
         try { _ = GetStatus(); }
         catch { /* first request will retry */ }
@@ -311,6 +314,7 @@ public sealed class GatewayPulseService
         if (alerts.TrimodeOffline && !status.TrimodeSeen)
             problems.Add("RMS Trimode is offline");
 
+        // ScannerStopped uses ScannerEnabled from Trimode SCAN / probe path only — never ScanChannels[].Active.
         if (alerts.ScannerStopped && status.TrimodeSeen && status.ScannerEnabled == false)
             problems.Add("Scanner is stopped");
 
@@ -322,6 +326,9 @@ public sealed class GatewayPulseService
             return;
 
         var now = DateTime.UtcNow;
+        var previousProblems = _lastAlertStateKey is "" or "HEALTHY"
+            ? Array.Empty<string>()
+            : _lastAlertStateKey.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         if (_lastAlertSentUtc != DateTime.MinValue &&
             (now - _lastAlertSentUtc).TotalMinutes < _pushover.CooldownMinutes)
@@ -339,6 +346,8 @@ public sealed class GatewayPulseService
             _ = _pushover.SendAsync(
                 "🔴 Gateway Pulse Alert",
                 $"{status.GatewayName}\n\n{string.Join("\n", problems)}\n\n{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+
+            PublishGatewayProblemEvents(status, problems, previousProblems);
         }
         else if (alerts.Recovery)
         {
@@ -347,6 +356,17 @@ public sealed class GatewayPulseService
             _ = _pushover.SendAsync(
                 "🟢 Gateway Pulse Recovery",
                 $"{status.GatewayName}\n\nGateway health is restored.\n\n{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+
+            _ = _mobileAlerts.PublishAsync(new MobileAlertEvent
+            {
+                Type = MobileAlertTypes.GatewayRecovery,
+                Source = "gateway",
+                Severity = MobileAlertSeverity.Info,
+                Title = "Gateway Pulse Recovery",
+                Message = "Gateway health is restored.",
+                IsRecovery = true,
+                GatewayName = status.GatewayName
+            });
         }
     }
 
@@ -363,6 +383,7 @@ public sealed class GatewayPulseService
 
         _lastStationAlertKey = stationKey;
 
+        // First observation is suppressed (prime only) — same as Pushover path.
         if (!_stationAlertPrimed)
         {
             _stationAlertPrimed = true;
@@ -381,6 +402,70 @@ public sealed class GatewayPulseService
         _ = _pushover.SendAsync(
             "Gateway Pulse Station Connected",
             $"{status.GatewayName}\n\nStation connected: {status.LastStation}\n\n{status.LastRelayEvent}");
+
+        _ = _mobileAlerts.PublishAsync(new MobileAlertEvent
+        {
+            Type = MobileAlertTypes.GatewayStationConnected,
+            Source = "gateway",
+            Severity = MobileAlertSeverity.Info,
+            Title = "Station Connected",
+            Message = $"Station connected: {status.LastStation}\n{status.LastRelayEvent}",
+            GatewayName = status.GatewayName
+        });
+    }
+
+    private void PublishGatewayProblemEvents(
+        GatewayStatus status,
+        List<string> problems,
+        IReadOnlyList<string> previousProblems)
+    {
+        var previous = new HashSet<string>(previousProblems, StringComparer.OrdinalIgnoreCase);
+        foreach (var problem in problems)
+        {
+            if (previous.Contains(problem))
+                continue;
+
+            MobileAlertEvent? evt = null;
+            if (problem.Contains("Relay", StringComparison.OrdinalIgnoreCase))
+            {
+                evt = new MobileAlertEvent
+                {
+                    Type = MobileAlertTypes.GatewayRelayOffline,
+                    Source = "gateway",
+                    Severity = MobileAlertSeverity.Warning,
+                    Title = "RMS Relay Offline",
+                    Message = problem,
+                    GatewayName = status.GatewayName
+                };
+            }
+            else if (problem.Contains("Trimode", StringComparison.OrdinalIgnoreCase))
+            {
+                evt = new MobileAlertEvent
+                {
+                    Type = MobileAlertTypes.GatewayTrimodeOffline,
+                    Source = "gateway",
+                    Severity = MobileAlertSeverity.Warning,
+                    Title = "RMS Trimode Offline",
+                    Message = problem,
+                    GatewayName = status.GatewayName
+                };
+            }
+            else if (problem.Contains("Scanner", StringComparison.OrdinalIgnoreCase))
+            {
+                evt = new MobileAlertEvent
+                {
+                    Type = MobileAlertTypes.GatewayScannerStopped,
+                    Source = "gateway",
+                    Severity = MobileAlertSeverity.Warning,
+                    Title = "Scanner Stopped",
+                    Message = problem,
+                    GatewayName = status.GatewayName
+                };
+            }
+
+            if (evt is not null)
+                _ = _mobileAlerts.PublishAsync(evt);
+        }
     }
 
     private void TryReadTrimodeMemory(GatewayStatus status, bool allowFullMemorySearch = true)
