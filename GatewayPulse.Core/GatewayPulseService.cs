@@ -9,6 +9,8 @@ namespace GatewayPulse.Core;
 
 public sealed class GatewayPulseService
 {
+    internal readonly record struct ScannerLogObservation(bool Enabled, DateTime ObservedAt, string Source);
+
     private readonly IOptionsMonitor<GatewayPulseOptions> _options;
     private readonly IOptionsMonitor<AlertOptions> _alerts;
     private readonly PushoverService _pushover;
@@ -37,6 +39,8 @@ public sealed class GatewayPulseService
     private bool? _lastKnownScannerEnabled;
     private DateTime _lastScannerOkUtc = DateTime.MinValue;
     private DateTime _lastScannerAttemptUtc = DateTime.MinValue;
+    private ScannerLogObservation? _lastLogScannerObservation;
+    private DateTime? _trimodeLogSessionStartedAt;
     private DateTime _lastIniParseUtc = DateTime.MinValue;
 
     /// <summary>Consecutive memory-read misses before clearing TX observation (avoids flicker).</summary>
@@ -68,10 +72,22 @@ public sealed class GatewayPulseService
     {
         // Log parsing is expensive — keep it outside the lock so the live-radio poller
         // can keep tracking Trimode scan hops while /api/status is building.
-        var status = BuildStatusFromLogs();
+        var (status, logScannerObservation, trimodeSessionStartedAt) = BuildStatusFromLogs();
 
         lock (_lock)
         {
+            // Recheck after the out-of-lock log read. If Trimode restarted while
+            // parsing, do not publish an observation from the process that exited.
+            var currentTrimodeSessionStartedAt = GetProcessStartTime("RMS Trimode");
+            status.TrimodeSeen = currentTrimodeSessionStartedAt.HasValue || IsProcessRunning("RMS Trimode");
+            if (currentTrimodeSessionStartedAt != trimodeSessionStartedAt)
+                logScannerObservation = null;
+
+            UpdateLogScannerObservation(
+                status.TrimodeSeen,
+                currentTrimodeSessionStartedAt,
+                logScannerObservation);
+
             // Never start/stop Trimode. Probes are opt-in — off by default (can recycle Trimode).
             var probe = _options.CurrentValue.TrimodeProbe ?? new TrimodeProbeOptions();
             if (probe.CommandPortEnabled)
@@ -130,7 +146,9 @@ public sealed class GatewayPulseService
             var probe = _options.CurrentValue.TrimodeProbe ?? new TrimodeProbeOptions();
             if (!probe.CommandPortEnabled && !probe.MemoryReadEnabled)
             {
-                _status.TrimodeSeen = IsProcessRunning("RMS Trimode");
+                var currentTrimodeSessionStartedAt = GetProcessStartTime("RMS Trimode");
+                _status.TrimodeSeen = currentTrimodeSessionStartedAt.HasValue || IsProcessRunning("RMS Trimode");
+                UpdateLogScannerObservation(_status.TrimodeSeen, currentTrimodeSessionStartedAt, observation: null);
                 ApplyProbeDisabledScannerStatus(_status);
                 ApplyProbeDisabledFrequencyStatus(_status);
                 _status.Healthy =
@@ -141,12 +159,13 @@ public sealed class GatewayPulseService
             }
 
             var now = DateTime.UtcNow;
+            var trimodeSessionStartedAt = GetProcessStartTime("RMS Trimode");
             var live = new GatewayStatus
             {
                 GatewayName = _status.GatewayName,
                 Callsign = _status.Callsign,
                 DemoMode = _status.DemoMode,
-                TrimodeSeen = IsProcessRunning("RMS Trimode")
+                TrimodeSeen = trimodeSessionStartedAt.HasValue || IsProcessRunning("RMS Trimode")
             };
 
             if (_status.ScanChannels.Count > 0 &&
@@ -174,7 +193,10 @@ public sealed class GatewayPulseService
             if (probe.CommandPortEnabled)
                 PollTrimodeScannerStatus(live, force: false, allowRetry: false);
             else
+            {
+                UpdateLogScannerObservation(live.TrimodeSeen, trimodeSessionStartedAt, observation: null);
                 ApplyProbeDisabledScannerStatus(live);
+            }
 
             if (probe.MemoryReadEnabled)
                 TryReadTrimodeMemory(live, allowFullMemorySearch: false);
@@ -212,8 +234,44 @@ public sealed class GatewayPulseService
             return;
         }
 
-        // RadioCat/CI-V observes frequency only. With the SCAN probe disabled,
-        // scanner state is unavailable even when CAT frequency is live.
+        ApplyLogScannerObservation(status, _lastLogScannerObservation);
+    }
+
+    private void UpdateLogScannerObservation(
+        bool trimodeSeen,
+        DateTime? sessionStartedAt,
+        ScannerLogObservation? observation)
+    {
+        if (!trimodeSeen || !sessionStartedAt.HasValue)
+        {
+            _trimodeLogSessionStartedAt = null;
+            _lastLogScannerObservation = null;
+            return;
+        }
+
+        if (_trimodeLogSessionStartedAt != sessionStartedAt)
+        {
+            _trimodeLogSessionStartedAt = sessionStartedAt;
+            _lastLogScannerObservation = null;
+        }
+
+        if (observation.HasValue)
+            _lastLogScannerObservation = observation;
+    }
+
+    internal static void ApplyLogScannerObservation(
+        GatewayStatus status,
+        ScannerLogObservation? observation)
+    {
+        if (observation is { } scanner)
+        {
+            status.ScannerEnabled = scanner.Enabled;
+            status.ScannerStatus = scanner.Enabled ? "Scanning" : "Stopped";
+            return;
+        }
+
+        // RadioCat/CI-V observes frequency only. Without a current-session log
+        // event (or the opt-in SCAN probe), scanner state remains unknown.
         status.ScannerEnabled = null;
         status.ScannerStatus = "Not probed";
     }
@@ -252,9 +310,11 @@ public sealed class GatewayPulseService
         LastScan = status.LastScan
     };
 
-    private GatewayStatus BuildStatusFromLogs()
+    private (GatewayStatus Status, ScannerLogObservation? ScannerObservation, DateTime? TrimodeSessionStartedAt)
+        BuildStatusFromLogs()
     {
         var options = _options.CurrentValue;
+        var trimodeSessionStartedAt = GetProcessStartTime("RMS Trimode");
 
         var status = new GatewayStatus
         {
@@ -269,10 +329,15 @@ public sealed class GatewayPulseService
         var hourlyActivity = CreateHourlyActivity();
 
         status.RelayRunning = IsProcessRunning("RMS Relay");
-        status.TrimodeSeen = IsProcessRunning("RMS Trimode");
+        status.TrimodeSeen = trimodeSessionStartedAt.HasValue || IsProcessRunning("RMS Trimode");
 
         ParseRelayLogs(status, eventsList, stationCounts, stationConnections, hourlyActivity);
-        ParseTrimodeLogs(status, eventsList, hourlyActivity);
+        ParseTrimodeLogs(
+            status,
+            eventsList,
+            hourlyActivity,
+            trimodeSessionStartedAt,
+            out var scannerObservation);
         ParseTrimodeIni(status);
         ApplyProcessStartTimes(status);
 
@@ -296,7 +361,7 @@ public sealed class GatewayPulseService
             .Take(80)
             .ToList();
 
-        return status;
+        return (status, scannerObservation, trimodeSessionStartedAt);
     }
 
     private void EvaluateAlerts(GatewayStatus status)
@@ -310,7 +375,7 @@ public sealed class GatewayPulseService
         if (alerts.TrimodeOffline && !status.TrimodeSeen)
             problems.Add("RMS Trimode is offline");
 
-        // ScannerStopped uses ScannerEnabled from Trimode SCAN / probe path only — never ScanChannels[].Active.
+        // ScannerStopped uses authoritative Trimode log / SCAN-probe state only — never ScanChannels[].Active.
         if (alerts.ScannerStopped && IsAuthoritativeScannerStopped(status))
             problems.Add("Scanner is stopped");
 
@@ -1035,8 +1100,11 @@ public sealed class GatewayPulseService
     private void ParseTrimodeLogs(
         GatewayStatus status,
         List<GatewayEvent> eventsList,
-        List<HourlyActivity> hourlyActivity)
+        List<HourlyActivity> hourlyActivity,
+        DateTime? trimodeSessionStartedAt,
+        out ScannerLogObservation? scannerObservation)
     {
+        scannerObservation = null;
         DateTime newestTrimodeEvent = DateTime.MinValue;
         DateTime newestSfiTime = DateTime.MinValue;
         int? newestSfi = null;
@@ -1053,6 +1121,18 @@ public sealed class GatewayPulseService
                 if (ts is null) continue;
 
                 var dt = ParseAnyTime(ts) ?? DateTime.MinValue;
+
+                if (trimodeSessionStartedAt.HasValue &&
+                    dt >= trimodeSessionStartedAt.Value.AddSeconds(-2))
+                {
+                    var candidate = ParseScannerLogObservation(line, dt);
+                    if (candidate.HasValue &&
+                        (!scannerObservation.HasValue ||
+                         candidate.Value.ObservedAt >= scannerObservation.Value.ObservedAt))
+                    {
+                        scannerObservation = candidate;
+                    }
+                }
 
                 if (dt > newestTrimodeEvent)
                 {
@@ -1115,6 +1195,43 @@ public sealed class GatewayPulseService
 
         if (newestSfi.HasValue)
             status.LastSfi = newestSfi.Value;
+    }
+
+    internal static ScannerLogObservation? FindLatestScannerLogObservation(
+        IEnumerable<string> lines,
+        DateTime sessionStartedAt)
+    {
+        ScannerLogObservation? latest = null;
+
+        foreach (var line in lines)
+        {
+            var timestamp = ExtractTimestamp(line);
+            var observedAt = timestamp is null ? null : ParseAnyTime(timestamp);
+            if (!observedAt.HasValue || observedAt.Value < sessionStartedAt.AddSeconds(-2))
+                continue;
+
+            var candidate = ParseScannerLogObservation(line, observedAt.Value);
+            if (candidate.HasValue &&
+                (!latest.HasValue || candidate.Value.ObservedAt >= latest.Value.ObservedAt))
+            {
+                latest = candidate;
+            }
+        }
+
+        return latest;
+    }
+
+    private static ScannerLogObservation? ParseScannerLogObservation(string line, DateTime observedAt)
+    {
+        if (line.Contains("Scanning suspended", StringComparison.OrdinalIgnoreCase))
+            return new ScannerLogObservation(false, observedAt, "Scanning suspended");
+
+        // This is the only positive scanner-start message confirmed in the
+        // available RMS Trimode 1.4.2.0 production log sample.
+        if (line.Contains("Scanner thread started", StringComparison.OrdinalIgnoreCase))
+            return new ScannerLogObservation(true, observedAt, "Scanner thread started");
+
+        return null;
     }
 
     private static List<HourlyActivity> CreateHourlyActivity()
