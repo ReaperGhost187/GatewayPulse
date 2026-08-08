@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using GatewayPulse.RfMonitoring;
 
 namespace GatewayPulse.ServiceHosting;
 
@@ -126,10 +127,11 @@ public static class Lp100MonitorLaunchSpec
         }
         else
         {
-            if (!string.IsNullOrWhiteSpace(options.Port))
+            var port = SerialPortName.Normalize(options.Port);
+            if (!string.IsNullOrWhiteSpace(port))
             {
                 Add("--port");
-                Add(options.Port.Trim());
+                Add(port);
             }
             if (!options.AutoDetect)
                 Add("--no-auto-detect");

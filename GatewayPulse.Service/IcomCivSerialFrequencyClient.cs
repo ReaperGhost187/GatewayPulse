@@ -1,5 +1,6 @@
 using System.IO.Ports;
 using GatewayPulse.Core;
+using GatewayPulse.RfMonitoring;
 using Microsoft.Extensions.Options;
 
 namespace GatewayPulse.ServiceHosting;
@@ -24,7 +25,9 @@ public sealed class IcomCivSerialFrequencyClient(IOptionsMonitor<GatewayPulseOpt
 
         var baud = cat.BaudRate > 0 ? cat.BaudRate : 19200;
         var timeout = Math.Clamp(cat.TimeoutMs, 100, 2000);
-        var portName = cat.PortName.Trim().ToUpperInvariant();
+        var portName = SerialPortName.Normalize(cat.PortName);
+        if (string.IsNullOrWhiteSpace(portName))
+            return Task.FromResult<(decimal?, string)>((null, "CI-V COM port not set"));
 
         // SerialPort.Open/Read are synchronous and can stall on bad drivers / missing ports
         // under a service account. Always hop off the caller so hosted-service StartAsync

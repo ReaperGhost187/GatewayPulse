@@ -118,4 +118,21 @@ public sealed class Lp100MonitorLaunchSpecTests
         Assert.Contains("--mock", start.ArgumentList);
         Assert.Contains("--force-demo", start.ArgumentList);
     }
+
+    [Fact]
+    public void Create_NormalizesBarePortNumberToComForm()
+    {
+        var start = Lp100MonitorLaunchSpec.Create(new Lp100MonitorOptions
+        {
+            ExecutablePath = @"C:\temp\GatewayPulse.Lp100Monitor.exe",
+            Port = "4",
+            OutputPath = @"C:\PWM\RfTelemetry.json",
+            LogsPath = @"C:\PWM\logs"
+        }, @"C:\temp");
+
+        var args = start.ArgumentList.ToList();
+        var portIndex = args.IndexOf("--port");
+        Assert.True(portIndex >= 0);
+        Assert.Equal("COM4", args[portIndex + 1]);
+    }
 }

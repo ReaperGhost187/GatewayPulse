@@ -9,6 +9,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Normalize-SerialPortName {
+    param([string]$PortName)
+    if ([string]::IsNullOrWhiteSpace($PortName)) { return "" }
+    $trimmed = $PortName.Trim().ToUpperInvariant()
+    if ($trimmed.StartsWith('\\.\')) { $trimmed = $trimmed.Substring(4) }
+    if ($trimmed -match '^COM\d+$') { return $trimmed }
+    if ($trimmed -match '^\d+$' -and [int]$trimmed -gt 0) { return "COM$trimmed" }
+    return $trimmed
+}
+
 if (-not $AppSettingsPath) {
     $AppSettingsPath = Join-Path $PSScriptRoot "appsettings.json"
 }
@@ -31,7 +41,7 @@ $json.Lp100Monitor.IntervalMs = 250
 $json.Lp100Monitor.IdleIntervalMs = 1000
 $json.Lp100Monitor.RestartDelaySeconds = 10
 $json.Lp100Monitor.HistoryEnabled = $true
-if ($PSBoundParameters.ContainsKey("Port")) { $json.Lp100Monitor.Port = $Port }
+if ($PSBoundParameters.ContainsKey("Port")) { $json.Lp100Monitor.Port = (Normalize-SerialPortName $Port) }
 if ($AutoDetect) { $json.Lp100Monitor.AutoDetect = $true }
 if ($Disable) { $json.Lp100Monitor.Enabled = $false }
 elseif ($Enable) { $json.Lp100Monitor.Enabled = $true }

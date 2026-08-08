@@ -1,3 +1,5 @@
+using GatewayPulse.RfMonitoring;
+
 namespace GatewayPulse.Lp100Monitor.CommandLine;
 
 public enum MonitorMode
@@ -63,7 +65,9 @@ public sealed class MonitorOptions
         return new MonitorOptions
         {
             Mode = mode,
-            Port = map.TryGetValue("--port", out var port) ? port : null,
+            Port = map.TryGetValue("--port", out var port)
+                ? NullIfEmpty(SerialPortName.Normalize(port))
+                : null,
             AutoDetect = autoDetect,
             BaudRate = baud,
             OutputPath = map.TryGetValue("--output", out var output) && !string.IsNullOrWhiteSpace(output)
@@ -104,4 +108,7 @@ public sealed class MonitorOptions
         --force-demo             Allow mock writes under C:\PWM
         --help                   Show help
         """;
+
+    private static string? NullIfEmpty(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
 }

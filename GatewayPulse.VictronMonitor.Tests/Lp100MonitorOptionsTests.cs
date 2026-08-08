@@ -45,4 +45,16 @@ public sealed class Lp100MonitorOptionsTests
         Assert.True(options.CaptureRaw);
         Assert.Equal(80, options.IntervalMs);
     }
+
+    [Fact]
+    public void Parse_NormalizesBarePortNumber()
+    {
+        var options = MonitorOptions.Parse([
+            "--port", "4",
+            "--output", "RfTelemetry.json",
+            "--logs", "logs"
+        ]);
+
+        Assert.Equal("COM4", options.Port);
+    }
 }

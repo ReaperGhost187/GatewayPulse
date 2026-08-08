@@ -542,22 +542,9 @@ app.MapPost("/api/settings", async (AppSettingsEditModel settings) =>
     gatewayPulse["GatewayName"] = settings.GatewayPulse.GatewayName.Trim();
     gatewayPulse["Callsign"] = settings.GatewayPulse.Callsign.Trim().ToUpperInvariant();
 
-    var radioCat = settings.GatewayPulse.RadioCat ?? new RadioCatOptions();
-    if (radioCat.Port <= 0) radioCat.Port = 4532;
-    if (radioCat.TimeoutMs < 100) radioCat.TimeoutMs = 400;
-    if (string.IsNullOrWhiteSpace(radioCat.Host)) radioCat.Host = "127.0.0.1";
-    if (radioCat.BaudRate <= 0) radioCat.BaudRate = 19200;
-    if (radioCat.PollSeconds < 1) radioCat.PollSeconds = 2;
-    if (radioCat.PollSeconds > 30) radioCat.PollSeconds = 30;
-    if (string.IsNullOrWhiteSpace(radioCat.Mode)) radioCat.Mode = "CivCom";
-    if (string.IsNullOrWhiteSpace(radioCat.CivAddress)) radioCat.CivAddress = "94";
-    radioCat.PortName = (radioCat.PortName ?? "").Trim().ToUpperInvariant();
-    radioCat.CivAddress = radioCat.CivAddress.Trim();
-    radioCat.Mode = radioCat.Mode.Trim();
-    gatewayPulse["RadioCat"] = JsonSerializer.SerializeToNode(radioCat, new JsonSerializerOptions
-    {
-        WriteIndented = true
-    });
+    // Omit RadioCat / Lp100Monitor from the JSON body to preserve existing values.
+    // Partial posts (e.g. LP-100 Test Connection) must not wipe CI-V settings, and vice versa.
+    SettingsSectionMerge.ApplyRadioCat(gatewayPulse, settings.GatewayPulse.RadioCat);
 
     var pushover = root["Pushover"] as JsonObject;
     if (pushover is null)
@@ -594,38 +581,7 @@ app.MapPost("/api/settings", async (AppSettingsEditModel settings) =>
         WriteIndented = true
     });
 
-    var lp = settings.Lp100Monitor ?? new Lp100MonitorOptions();
-    if (lp.BaudRate <= 0) lp.BaudRate = 115200;
-    if (lp.IntervalMs < 50) lp.IntervalMs = 80;
-    if (lp.IdleIntervalMs < 250) lp.IdleIntervalMs = 1000;
-    if (lp.RestartDelaySeconds < 1) lp.RestartDelaySeconds = 10;
-    if (lp.TxThresholdWatts <= 0) lp.TxThresholdWatts = 0.05m;
-    if (lp.SwrMinForwardWatts <= 0) lp.SwrMinForwardWatts = 0.5m;
-    // Prefer SessionCoalesceMs; keep TxEndDebounceMs as a synced legacy alias.
-    if (lp.SessionCoalesceMs < 100 && lp.TxEndDebounceMs >= 100)
-        lp.SessionCoalesceMs = lp.TxEndDebounceMs;
-    if (lp.SessionCoalesceMs < 100) lp.SessionCoalesceMs = 6000;
-    lp.TxEndDebounceMs = lp.SessionCoalesceMs;
-    lp.Port = (lp.Port ?? "").Trim().ToUpperInvariant();
-    lp.Alerts ??= new Lp100AlertOptions();
-    root["Lp100Monitor"] = JsonSerializer.SerializeToNode(lp, new JsonSerializerOptions
-    {
-        WriteIndented = true
-    });
-
-    var rfMonitoring = root["RfMonitoring"] as JsonObject ?? new JsonObject();
-    root["RfMonitoring"] = rfMonitoring;
-    rfMonitoring["TelemetryPath"] = string.IsNullOrWhiteSpace(lp.OutputPath) ? @"C:\PWM\RfTelemetry.json" : lp.OutputPath;
-    if (rfMonitoring["HistoryPath"] is null)
-        rfMonitoring["HistoryPath"] = @"C:\PWM\RfHistory.json";
-    if (rfMonitoring["AnalysisPath"] is null)
-        rfMonitoring["AnalysisPath"] = @"C:\PWM\RfAnalysis.json";
-    if (rfMonitoring["SwrByFrequencyPath"] is null)
-        rfMonitoring["SwrByFrequencyPath"] = @"C:\PWM\RfSwrByFrequency.json";
-    if (rfMonitoring["TransmissionHistoryPath"] is null)
-        rfMonitoring["TransmissionHistoryPath"] = @"C:\PWM\RfTransmissionHistory.json";
-    if (rfMonitoring["StaleAfterSeconds"] is null)
-        rfMonitoring["StaleAfterSeconds"] = 10;
+    SettingsSectionMerge.ApplyLp100Monitor(root, settings.Lp100Monitor);
 
     await File.WriteAllTextAsync(appsettingsPath, root.ToJsonString(new JsonSerializerOptions
     {
@@ -644,14 +600,16 @@ public sealed class AppSettingsEditModel
     public AlertOptions Alerts { get; set; } = new();
     public DashboardPreferences Preferences { get; set; } = DashboardPreferences.CreateDefaults();
     public NetworkMapOptions NetworkMap { get; set; } = NetworkMapOptions.CreateDefaults();
-    public Lp100MonitorOptions Lp100Monitor { get; set; } = new();
+    /// <summary>Null when omitted from POST — existing Lp100Monitor section is preserved.</summary>
+    public Lp100MonitorOptions? Lp100Monitor { get; set; }
 }
 
 public sealed class GatewayPulseSettingsEditModel
 {
     public string GatewayName { get; set; } = "";
     public string Callsign { get; set; } = "";
-    public RadioCatOptions RadioCat { get; set; } = new();
+    /// <summary>Null when omitted from POST — existing RadioCat section is preserved.</summary>
+    public RadioCatOptions? RadioCat { get; set; }
 }
 
 public sealed class PushoverSettingsEditModel

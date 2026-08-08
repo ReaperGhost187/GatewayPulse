@@ -689,10 +689,20 @@ async function loadComPorts(selected){
   }
 }
 
+function normalizeSerialPortName(value){
+  if(value == null) return '';
+  let trimmed = String(value).trim().toUpperCase();
+  if(!trimmed) return '';
+  if(trimmed.startsWith('\\\\.\\')) trimmed = trimmed.slice(4);
+  if(/^COM\d+$/.test(trimmed)) return trimmed;
+  if(/^\d+$/.test(trimmed) && Number(trimmed) > 0) return 'COM' + trimmed;
+  return trimmed;
+}
+
 function readRadioCatPortName(){
   const typed = document.getElementById('radioCatPortNameText').value.trim();
-  if(typed) return typed.toUpperCase();
-  return (document.getElementById('radioCatPortName').value || '').trim().toUpperCase();
+  if(typed) return normalizeSerialPortName(typed);
+  return normalizeSerialPortName(document.getElementById('radioCatPortName').value || '');
 }
 
 function readRadioCatFromForm(){
@@ -717,7 +727,7 @@ function applyRadioCatToForm(radioCat){
   document.getElementById('radioCatCivAddress').value = readValue(radioCat, 'civAddress', 'CivAddress', '94');
   document.getElementById('radioCatHost').value = readValue(radioCat, 'host', 'Host', '127.0.0.1');
   document.getElementById('radioCatPort').value = String(readValue(radioCat, 'port', 'Port', 4532));
-  const portName = readValue(radioCat, 'portName', 'PortName', '');
+  const portName = normalizeSerialPortName(readValue(radioCat, 'portName', 'PortName', ''));
   document.getElementById('radioCatPortNameText').value = portName || '';
   return loadComPorts(portName);
 }
@@ -854,7 +864,7 @@ function applyLp100ToForm(lp){
   const src = lp || {};
   document.getElementById('lp100Enabled').checked = !!readValue(src, 'enabled', 'Enabled', false);
   document.getElementById('lp100AutoDetect').checked = readValue(src, 'autoDetect', 'AutoDetect', true) !== false;
-  document.getElementById('lp100Port').value = readValue(src, 'port', 'Port', '');
+  document.getElementById('lp100Port').value = normalizeSerialPortName(readValue(src, 'port', 'Port', ''));
   document.getElementById('lp100Baud').value = String(readValue(src, 'baudRate', 'BaudRate', 115200));
   document.getElementById('lp100TxThreshold').value = String(readValue(src, 'txThresholdWatts', 'TxThresholdWatts', 0.05));
   document.getElementById('lp100Interval').value = String(readValue(src, 'intervalMs', 'IntervalMs', 80));
@@ -880,7 +890,7 @@ function readLp100FromForm(){
   const high = highRaw === '' ? null : Number(highRaw);
   return {
     Enabled: document.getElementById('lp100Enabled').checked,
-    Port: document.getElementById('lp100Port').value.trim(),
+    Port: normalizeSerialPortName(document.getElementById('lp100Port').value),
     AutoDetect: document.getElementById('lp100AutoDetect').checked,
     BaudRate: Number(document.getElementById('lp100Baud').value) || 115200,
     TxThresholdWatts: Number(document.getElementById('lp100TxThreshold').value) || 0.05,
@@ -1085,13 +1095,15 @@ document.getElementById('lp100Test').addEventListener('click', async () => {
   msg.className = 'message';
   try{
     // Persist current LP-100 fields first so the test uses the form values.
+    // Include RadioCat so a partial settings POST never clears CI-V (server also merges/preserves omitted sections).
     await fetch('/api/settings', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         GatewayPulse:{
           GatewayName:document.getElementById('gatewayName').value,
-          Callsign:document.getElementById('callsign').value
+          Callsign:document.getElementById('callsign').value,
+          RadioCat: readRadioCatFromForm()
         },
         Pushover:{
           Enabled:document.getElementById('pushoverEnabled').checked,

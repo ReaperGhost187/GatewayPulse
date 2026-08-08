@@ -40,7 +40,8 @@ public sealed class TelePostLp100Provider : IRfMonitor
         Func<string, int, ISerialPortSession>? portFactory = null,
         RawCaptureWriter? captureWriter = null)
     {
-        _preferredPort = string.IsNullOrWhiteSpace(preferredPort) ? null : preferredPort.Trim();
+        var normalized = SerialPortName.Normalize(preferredPort);
+        _preferredPort = string.IsNullOrWhiteSpace(normalized) ? null : normalized;
         _autoDetect = autoDetect;
         _baudRate = baudRate;
         _txThresholdWatts = txThresholdWatts;
