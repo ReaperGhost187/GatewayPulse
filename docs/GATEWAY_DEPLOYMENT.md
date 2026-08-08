@@ -5,7 +5,7 @@ This package upgrades the proven BatteryProtect integration without changing the
 ## Production paths
 
 ```text
-Installer:          GatewayPulseSetup_v1.2.14.exe
+Installer:          GatewayPulseSetup_v1.2.15.exe
 Service:            C:\Program Files\Gateway Pulse\Service\GatewayPulse.exe
 Collector:          C:\Program Files\Gateway Pulse\Service\VictronMonitor\GatewayPulse.VictronMonitor.exe
 Configuration:      C:\Program Files\Gateway Pulse\Service\appsettings.json
@@ -112,15 +112,15 @@ The installer validates and applies the protected ACL. It never overwrites this 
 Copy these two files to a staging folder on the gateway:
 
 ```text
-GatewayPulseSetup_v1.2.14.exe
-GatewayPulseSetup_v1.2.14.sha256.txt
+GatewayPulseSetup_v1.2.15.exe
+GatewayPulseSetup_v1.2.15.sha256.txt
 ```
 
 Verify before running:
 
 ```powershell
-Get-FileHash .\GatewayPulseSetup_v1.2.14.exe -Algorithm SHA256
-Get-Content .\GatewayPulseSetup_v1.2.14.sha256.txt
+Get-FileHash .\GatewayPulseSetup_v1.2.15.exe -Algorithm SHA256
+Get-Content .\GatewayPulseSetup_v1.2.15.sha256.txt
 ```
 
 The values must match exactly.
@@ -128,7 +128,7 @@ The values must match exactly.
 ## 5. Install or upgrade
 
 ```powershell
-Start-Process .\GatewayPulseSetup_v1.2.14.exe -Verb RunAs -Wait
+Start-Process .\GatewayPulseSetup_v1.2.15.exe -Verb RunAs -Wait
 ```
 
 Installer flow:

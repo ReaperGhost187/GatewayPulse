@@ -196,11 +196,25 @@ public sealed class GatewayPulseService
         }
     }
 
-    private static void ApplyProbeDisabledScannerStatus(GatewayStatus status)
+    private void ApplyProbeDisabledScannerStatus(GatewayStatus status)
     {
+        status.CommandPortStatus = "Disabled (TrimodeProbe.CommandPortEnabled=false)";
+
+        // Trimode SCAN probe is off — do not imply a Trimode scanner fault.
+        // When RadioCat/CI-V is the live-frequency path, report that calmly.
+        var radioCat = _options.CurrentValue.RadioCat;
+        if (radioCat?.Enabled == true)
+        {
+            status.ScannerEnabled = true;
+            var mode = radioCat.Mode ?? "";
+            status.ScannerStatus = mode.Equals("Rigctld", StringComparison.OrdinalIgnoreCase)
+                ? "Via CAT"
+                : "Via CI-V";
+            return;
+        }
+
         status.ScannerEnabled = null;
         status.ScannerStatus = "Not probed";
-        status.CommandPortStatus = "Disabled (TrimodeProbe.CommandPortEnabled=false)";
     }
 
     private void ApplyProbeDisabledFrequencyStatus(GatewayStatus status)

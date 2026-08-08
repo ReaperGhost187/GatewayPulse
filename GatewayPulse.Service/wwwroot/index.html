@@ -1284,8 +1284,14 @@ function applyLiveRadioFields(s){
   const scannerEnabled = s.scannerEnabled === true;
   const scannerUnknown = s.scannerEnabled == null;
   const scannerText = s.scannerStatus || '--';
-  const scannerClass = scannerEnabled ? 'good' : (scannerUnknown ? 'muted' : 'bad');
-  document.getElementById('scanner').innerHTML = `${led(scannerEnabled)}<span class="${scannerClass}">${scannerText}</span>`;
+  // CI-V/CAT labels (and unknown/not-probed) are informational — never a red fault LED.
+  const scannerViaCat = /ci-v|\bciv\b|\bcat\b/i.test(scannerText);
+  const scannerHealthy = scannerEnabled || scannerViaCat;
+  const scannerClass = scannerHealthy ? 'good' : (scannerUnknown ? 'muted' : 'bad');
+  const scannerLed = scannerHealthy
+    ? '<span class="led"></span>'
+    : (scannerUnknown ? '<span class="led warn"></span>' : led(false));
+  document.getElementById('scanner').innerHTML = `${scannerLed}<span class="${scannerClass}">${scannerText}</span>`;
 
   document.getElementById('current_freq').textContent = s.currentFrequencyKhz || '--';
   document.getElementById('dial_freq').textContent = s.dialFrequencyKhz || '--';
