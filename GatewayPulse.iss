@@ -1,5 +1,5 @@
-#define MyAppName "Gateway Pulse"
-#define MyAppVersion "1.2.20"
+﻿#define MyAppName "Gateway Pulse"
+#define MyAppVersion "1.2.25"
 #define MyAppPublisher "Gateway Pulse"
 #define MyServiceName "GatewayPulse"
 
@@ -80,7 +80,7 @@ begin
   BatteryProtectPage := CreateInputQueryPage(wpSelectTasks,
     'Victron BatteryProtect',
     'Configure the BatteryProtect monitor',
-    'Enter the Bluetooth address and the path to the existing 32-hex-character key file. The key value is never stored in the installer. On upgrades this page is skipped when appsettings.json already exists — MACs and C:\PWM\*.key files are kept.');
+    'Enter the Bluetooth address and the path to the existing 32-hex-character key file. The key value is never stored in the installer. On upgrades this page is skipped when appsettings.json already exists â€” MACs and C:\PWM\*.key files are kept.');
   BatteryProtectPage.Add('Bluetooth address:', False);
   BatteryProtectPage.Add('Key file:', False);
   BatteryProtectPage.Values[0] := '';

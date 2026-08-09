@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$InnoCompiler = ""
 )
 
@@ -114,7 +114,7 @@ if (Test-Path $PublishedSettings) {
     } else {
         $settingsJson.MobileApi.ApiToken = ""
     }
-    # Fail-closed APNs defaults — never ship Team/Key IDs, .p8 paths, or Enabled=true.
+    # Fail-closed APNs defaults â€” never ship Team/Key IDs, .p8 paths, or Enabled=true.
     if ($null -eq $settingsJson.ApplePush) {
         $settingsJson | Add-Member -NotePropertyName ApplePush -NotePropertyValue ([pscustomobject]@{
             Enabled = $false
@@ -145,9 +145,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
 
-$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.20.exe
+$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.25.exe
 $Hash = Get-FileHash $Installer.FullName -Algorithm SHA256
-$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.20.sha256.txt'
+$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.25.sha256.txt'
 $ChecksumLine = $Hash.Hash.ToLowerInvariant() + '  ' + $Installer.Name + "`n"
 [System.IO.File]::WriteAllText($ChecksumPath, $ChecksumLine, [System.Text.Encoding]::ASCII)
 $VerifiedHash = (Get-FileHash $Installer.FullName -Algorithm SHA256).Hash

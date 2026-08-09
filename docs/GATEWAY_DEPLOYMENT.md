@@ -1,11 +1,11 @@
-# Gateway Pulse v1.2 multi-device gateway deployment
+﻿# Gateway Pulse v1.2 multi-device gateway deployment
 
 This package upgrades the proven BatteryProtect integration without changing the live gateway until the installer is explicitly run. It adds optional SmartShunt 300A support and preserves a working BatteryProtect-only system when no SmartShunt is configured.
 
 ## Production paths
 
 ```text
-Installer:          GatewayPulseSetup_v1.2.20.exe
+Installer:          GatewayPulseSetup_v1.2.25.exe
 Service:            C:\Program Files\Gateway Pulse\Service\GatewayPulse.exe
 Collector:          C:\Program Files\Gateway Pulse\Service\VictronMonitor\GatewayPulse.VictronMonitor.exe
 Configuration:      C:\Program Files\Gateway Pulse\Service\appsettings.json
@@ -80,7 +80,7 @@ The diagnostic scan deliberately replaces Victron's one-byte key check with `00`
 
 ## 3. Place the SmartShunt key
 
-In VictronConnect, open the SmartShunt's **Settings → Product Info**, enable Instant Readout, select **Show** beside Instant Readout Details, and record its device-specific key.
+In VictronConnect, open the SmartShunt's **Settings â†’ Product Info**, enable Instant Readout, select **Show** beside Instant Readout Details, and record its device-specific key.
 
 Create the exact destination from an elevated PowerShell window without putting the value in shell history:
 
@@ -112,15 +112,15 @@ The installer validates and applies the protected ACL. It never overwrites this 
 Copy these two files to a staging folder on the gateway:
 
 ```text
-GatewayPulseSetup_v1.2.20.exe
-GatewayPulseSetup_v1.2.20.sha256.txt
+GatewayPulseSetup_v1.2.25.exe
+GatewayPulseSetup_v1.2.25.sha256.txt
 ```
 
 Verify before running:
 
 ```powershell
-Get-FileHash .\GatewayPulseSetup_v1.2.20.exe -Algorithm SHA256
-Get-Content .\GatewayPulseSetup_v1.2.20.sha256.txt
+Get-FileHash .\GatewayPulseSetup_v1.2.25.exe -Algorithm SHA256
+Get-Content .\GatewayPulseSetup_v1.2.25.sha256.txt
 ```
 
 The values must match exactly.
@@ -128,7 +128,7 @@ The values must match exactly.
 ## 5. Install or upgrade
 
 ```powershell
-Start-Process .\GatewayPulseSetup_v1.2.20.exe -Verb RunAs -Wait
+Start-Process .\GatewayPulseSetup_v1.2.25.exe -Verb RunAs -Wait
 ```
 
 Installer flow:
@@ -282,7 +282,7 @@ Reboot acceptance:
 Restart-Computer
 ```
 
-After sign-in, rerun sections 7–9. Gateway Pulse and the collector must start without an interactive login action, and both devices must recover automatically.
+After sign-in, rerun sections 7â€“9. Gateway Pulse and the collector must start without an interactive login action, and both devices must recover automatically.
 
 ## 11. Optional LP-100A RF monitoring (v1.2.4+)
 
@@ -297,9 +297,9 @@ Restart-Service GatewayPulse
 
 Telemetry lands at `C:\PWM\RfTelemetry.json`; TX events at `C:\PWM\RfTransmissionHistory.json`. Confirm on the dashboard Station RF card and `/api/rf`.
 
-Polling timing is editable in Settings → LP-100A / RF Monitoring (`IntervalMs`, `IdleIntervalMs`, `SessionCoalesceMs`). For PACTOR, enable Peak Hold on the LP-100A (operator setting — Gateway Pulse never sends F/A/M), use TX poll ~50–80 ms, and session coalesce ~6000 ms so overs merge into one Transmission History session (new installs default coalesce to 6000; `TxEndDebounceMs` remains a legacy alias). Existing saved values are left unchanged on upgrade. Use **RF Analysis** (`/rf-analysis.html`) for synchronized timelines.
+Polling timing is editable in Settings â†’ LP-100A / RF Monitoring (`IntervalMs`, `IdleIntervalMs`, `SessionCoalesceMs`). For PACTOR, enable Peak Hold on the LP-100A (operator setting â€” Gateway Pulse never sends F/A/M), use TX poll ~50â€“80 ms, and session coalesce ~6000 ms so overs merge into one Transmission History session (new installs default coalesce to 6000; `TxEndDebounceMs` remains a legacy alias). Existing saved values are left unchanged on upgrade. Use **RF Analysis** (`/rf-analysis.html`) for synchronized timelines.
 
-Optional live frequency (Settings → **Radio Frequency (CI-V)**). Preferred path is a dedicated CT-17 / USB CI-V COM port — not Trimode’s radio COM:
+Optional live frequency (Settings â†’ **Radio Frequency (CI-V)**). Preferred path is a dedicated CT-17 / USB CI-V COM port â€” not Trimodeâ€™s radio COM:
 
 ```json
 "GatewayPulse": {
@@ -321,7 +321,7 @@ Optional live frequency (Settings → **Radio Frequency (CI-V)**). Preferred pat
 }
 ```
 
-Use Settings → Test CI-V after the cable is connected. `Mode: "Rigctld"` remains available if you run Hamlib. Keep TrimodeProbe off when using CI-V. Without RadioCat, frequency falls back to Winlink/Trimode observations when those probes are enabled, otherwise Unknown / configured list only.
+Use Settings â†’ Test CI-V after the cable is connected. `Mode: "Rigctld"` remains available if you run Hamlib. Keep TrimodeProbe off when using CI-V. Without RadioCat, frequency falls back to Winlink/Trimode observations when those probes are enabled, otherwise Unknown / configured list only.
 
 ## 12. Rollback
 

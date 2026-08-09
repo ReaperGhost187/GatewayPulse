@@ -1,22 +1,22 @@
-# Gateway Pulse v1.2 Multi-Device Power
+﻿# Gateway Pulse v1.2 Multi-Device Power
 
 Gateway Pulse is a read-only Windows monitoring dashboard for RMS Relay and RMS Trimode gateways. This line preserves Smart BatteryProtect integration and adds Victron SmartShunt Instant Readout plus TelePost LP-100A RF / SWR monitoring.
 
 ## Screenshots
 
-### Dashboard — Station Power + RF Power
+### Dashboard â€” Station Power + RF Power
 
 ![Dashboard overview with Station Power and RF Power / SWR cards](docs/images/dashboard-overview.png)
 
 *Station overview with **Power System** (Victron) and **RF Power / SWR** (LP-100A) cards.*
 
-### RF Power — Transmission History
+### RF Power â€” Transmission History
 
 ![RF Power card with Transmission History expanded](docs/images/rf-power-transmission-history.png)
 
 *Live forward / reflected / SWR plus coalesced PACTOR and RF session history.*
 
-### RF Analysis — Timeline
+### RF Analysis â€” Timeline
 
 ![RF Analysis synchronized time-series chart](docs/images/rf-analysis-timeline.png)
 
@@ -28,7 +28,7 @@ Gateway Pulse is a read-only Windows monitoring dashboard for RMS Relay and RMS 
 
 *Per-session SWR observations plotted by frequency (not a time series).*
 
-### Settings — LP-100A / RF Monitoring
+### Settings â€” LP-100A / RF Monitoring
 
 ![Settings page LP-100A and RF monitoring section](docs/images/settings-lp100a.png)
 
@@ -36,14 +36,14 @@ Gateway Pulse is a read-only Windows monitoring dashboard for RMS Relay and RMS 
 
 ## Projects
 
-- `GatewayPulse.Core` — gateway monitoring, memory/log parsing, and Pushover
-- `GatewayPulse.Service` — Windows Service, Kestrel API, dashboard, and collector supervision
-- `GatewayPulse.Tray` — notification-area client
-- `GatewayPulse.PowerMonitoring` — provider-neutral schema-v2 telemetry, composition, atomic JSON, and file reader
-- `GatewayPulse.VictronMonitor` — shared BLE scanner, BatteryProtect/SmartShunt decoders, multi-device manager, scan/device/mock modes
-- `GatewayPulse.RfMonitoring` — LP-100A telemetry, transmission history, RF analysis, and SWR-by-frequency stores
-- `GatewayPulse.Lp100Monitor` — TelePost LP-100A serial collector (live + mock)
-- `GatewayPulse.VictronMonitor.Tests` — protocol, provider, manager, configuration, API/file, supervisor, and dashboard-state tests
+- `GatewayPulse.Core` â€” gateway monitoring, memory/log parsing, and Pushover
+- `GatewayPulse.Service` â€” Windows Service, Kestrel API, dashboard, and collector supervision
+- `GatewayPulse.Tray` â€” notification-area client
+- `GatewayPulse.PowerMonitoring` â€” provider-neutral schema-v2 telemetry, composition, atomic JSON, and file reader
+- `GatewayPulse.VictronMonitor` â€” shared BLE scanner, BatteryProtect/SmartShunt decoders, multi-device manager, scan/device/mock modes
+- `GatewayPulse.RfMonitoring` â€” LP-100A telemetry, transmission history, RF analysis, and SWR-by-frequency stores
+- `GatewayPulse.Lp100Monitor` â€” TelePost LP-100A serial collector (live + mock)
+- `GatewayPulse.VictronMonitor.Tests` â€” protocol, provider, manager, configuration, API/file, supervisor, and dashboard-state tests
 
 ## Power + RF flow
 
@@ -82,7 +82,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1
 The build runs Release .NET tests, Power System JavaScript state tests, multi-device configuration/ACL tests, four self-contained Windows publishes (service, tray, Victron, LP-100A), and Inno Setup compilation. Output:
 
 ```text
-Installer_Output\GatewayPulseSetup_v1.2.20.exe
+Installer_Output\GatewayPulseSetup_v1.2.25.exe
 ```
 
 ## Documentation
