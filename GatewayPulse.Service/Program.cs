@@ -183,7 +183,8 @@ app.MapGet("/api/status", (
     {
         status.CurrentFrequencyKhz = catKhz.Value.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
         // Dial approx for display (USB/LSB offset not known precisely from CI-V alone).
-        status.DialFrequencyKhz = (catKhz.Value - 1.500m).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
+        status.DialFrequencyKhz = PactorFrequency.CenterToDialKhz(catKhz.Value)
+            .ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
         status.LiveFrequencySource = string.IsNullOrWhiteSpace(catSource) ? "CI-V" : catSource;
         status.FrequencyUpdatedAt = catUpdated;
         status.MemoryReadStatus = catStatus;
@@ -211,7 +212,8 @@ app.MapGet("/api/live-radio", (
     if (catKhz is > 0)
     {
         live.CurrentFrequencyKhz = catKhz.Value.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
-        live.DialFrequencyKhz = (catKhz.Value - 1.500m).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
+        live.DialFrequencyKhz = PactorFrequency.CenterToDialKhz(catKhz.Value)
+            .ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
         live.LiveFrequencySource = string.IsNullOrWhiteSpace(catSource) ? "CI-V" : catSource;
         live.FrequencyUpdatedAt = catUpdated;
         live.MemoryReadStatus = catStatus;

@@ -417,7 +417,11 @@ public sealed class GatewayPulseService
         return (status, scannerObservation, trimodeSessionStartedAt);
     }
 
-    private void EvaluateAlerts(GatewayStatus status)
+    /// <summary>
+    /// Evaluates gateway problem/recovery transitions for Pushover + mobile publish.
+    /// Internal for targeted alert-pipeline tests — does not change scanner detection.
+    /// </summary>
+    internal void EvaluateAlerts(GatewayStatus status)
     {
         var alerts = _alerts.CurrentValue;
         var problems = new List<string>();
@@ -441,21 +445,23 @@ public sealed class GatewayPulseService
             return;
 
         var now = DateTime.UtcNow;
-        var previousProblems = _lastAlertStateKey is "" or "HEALTHY"
+        var previousKey = _lastAlertStateKey;
+        var previousProblems = previousKey is "" or "HEALTHY"
             ? Array.Empty<string>()
-            : _lastAlertStateKey.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        if (_lastAlertSentUtc != DateTime.MinValue &&
-            (now - _lastAlertSentUtc).TotalMinutes < _pushover.CooldownMinutes)
-        {
-            _lastAlertStateKey = currentStateKey;
-            return;
-        }
-
-        _lastAlertStateKey = currentStateKey;
+            : previousKey.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var inCooldown = _lastAlertSentUtc != DateTime.MinValue &&
+            (now - _lastAlertSentUtc).TotalMinutes < _pushover.CooldownMinutes;
+        var fromHealthy = previousKey is "" or "HEALTHY";
 
         if (problems.Count > 0)
         {
+            // Cooldown only suppresses problem→problem chatter. After HEALTHY rearm
+            // (including CAT/log resume Recovery), a new scanner-stopped must notify.
+            // Never adopt a problem key without publishing — that permanently swallows alerts.
+            if (inCooldown && !fromHealthy)
+                return;
+
+            _lastAlertStateKey = currentStateKey;
             _lastAlertSentUtc = now;
 
             _ = _pushover.SendAsync(
@@ -463,11 +469,16 @@ public sealed class GatewayPulseService
                 $"{status.GatewayName}\n\n{string.Join("\n", problems)}\n\n{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
 
             PublishGatewayProblemEvents(status, problems, previousProblems);
+            return;
         }
-        else if (alerts.Recovery)
-        {
-            _lastAlertSentUtc = now;
 
+        _lastAlertStateKey = "HEALTHY";
+
+        if (alerts.Recovery)
+        {
+            // Recovery must not start/extend the shared problem cooldown. Otherwise a
+            // CAT/log resume Recovery suppresses the next scanner-stopped within the window,
+            // and the old cooldown branch adopted the problem key without publishing.
             _ = _pushover.SendAsync(
                 "🟢 Gateway Pulse Recovery",
                 $"{status.GatewayName}\n\nGateway health is restored.\n\n{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -484,6 +495,16 @@ public sealed class GatewayPulseService
             });
         }
     }
+
+    /// <summary>Test hook: clear shared gateway alert debounce state.</summary>
+    internal void ResetAlertStateForTests()
+    {
+        _lastAlertStateKey = "";
+        _lastAlertSentUtc = DateTime.MinValue;
+    }
+
+    /// <summary>Test hook: backdate the last problem alert send for cooldown scenarios.</summary>
+    internal void SetLastAlertSentUtcForTests(DateTime utc) => _lastAlertSentUtc = utc;
 
     internal static bool IsAuthoritativeScannerStopped(GatewayStatus status) =>
         status.TrimodeSeen && status.ScannerEnabled == false;
@@ -875,7 +896,8 @@ public sealed class GatewayPulseService
         var khz = frequencyHz / 1000.0m;
         var now = DateTimeOffset.UtcNow;
         status.CurrentFrequencyKhz = khz.ToString("0.000", CultureInfo.InvariantCulture);
-        status.DialFrequencyKhz = ((frequencyHz - 1500) / 1000.0).ToString("0.000", CultureInfo.InvariantCulture);
+        status.DialFrequencyKhz = (PactorFrequency.CenterToDialHz(frequencyHz) / 1000.0)
+            .ToString("0.000", CultureInfo.InvariantCulture);
         status.LiveFrequencySource = source;
         status.FrequencyUpdatedAt = now;
         status.MemoryAddress = "0x" + address.ToInt64().ToString("X");
@@ -1095,7 +1117,8 @@ public sealed class GatewayPulseService
         {
             channels[0].Active = true;
             status.CurrentFrequencyKhz = channels[0].FrequencyKhz;
-            status.DialFrequencyKhz = ((channels[0].FrequencyHz - 1500) / 1000.0).ToString("0.000", CultureInfo.InvariantCulture);
+            status.DialFrequencyKhz = (PactorFrequency.CenterToDialHz(channels[0].FrequencyHz) / 1000.0)
+                .ToString("0.000", CultureInfo.InvariantCulture);
             status.CurrentMode = channels[0].Mode;
             status.ScanChannels = channels;
         }

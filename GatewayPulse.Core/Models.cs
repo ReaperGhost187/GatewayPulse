@@ -104,7 +104,9 @@ public sealed class HourlyActivity
 public sealed class ScanChannel
 {
     public int Number { get; set; }
+    /// <summary>RMS Trimode configured PACTOR center/carrier frequency.</summary>
     public string FrequencyKhz { get; set; } = "";
+    /// <summary>RMS Trimode configured PACTOR center/carrier frequency.</summary>
     public int FrequencyHz { get; set; }
     public string Mode { get; set; } = "PACTOR";
     public bool Active { get; set; }
