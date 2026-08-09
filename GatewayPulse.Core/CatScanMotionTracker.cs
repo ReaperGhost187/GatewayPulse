@@ -59,13 +59,7 @@ internal sealed class CatScanMotionTracker
             return false;
         }
 
-        var observedHz = decimal.ToInt32(frequencyHz);
-        var matchedHz = configuredHz
-            .Select(channelHz => new { ChannelHz = channelHz, Delta = Math.Abs((long)channelHz - observedHz) })
-            .Where(candidate => candidate.Delta <= MatchToleranceHz)
-            .OrderBy(candidate => candidate.Delta)
-            .Select(candidate => (int?)candidate.ChannelHz)
-            .FirstOrDefault();
+        var matchedHz = MatchConfiguredCenter(decimal.ToInt32(frequencyHz), configuredHz);
 
         // An off-list/manual tune invalidates the whole candidate sequence.
         if (!matchedHz.HasValue)
@@ -92,6 +86,46 @@ internal sealed class CatScanMotionTracker
             _transitions >= RequiredTransitions &&
             _distinctChannels.Count >= RequiredDistinctChannels;
         return Recovered;
+    }
+
+    /// <summary>
+    /// Maps a RadioCat/CI-V sample onto a configured Trimode center frequency.
+    /// <para>
+    /// <see cref="ScanChannel.FrequencyHz"/> is the Trimode INI PACTOR center/carrier.
+    /// Dashboard overlay treats the RadioCat cache value as that same center basis
+    /// (<c>CurrentFrequencyKhz</c> = cache, <c>DialFrequencyKhz</c> = center − 1.5 kHz).
+    /// Some radios still report the USB dial instead, so also accept
+    /// <see cref="PactorFrequency.DialToCenterHz"/> within the same tight tolerance.
+    /// </para>
+    /// </summary>
+    internal static int? MatchConfiguredCenter(int observedHz, IReadOnlyList<int> configuredCenterHz)
+    {
+        int? best = null;
+        long bestDelta = long.MaxValue;
+
+        foreach (var centerHz in configuredCenterHz)
+        {
+            Consider(observedHz, centerHz, ref best, ref bestDelta);
+
+            // Observation may be the radio dial for that center (center − 1.5 kHz).
+            if (observedHz <= int.MaxValue - PactorFrequency.CenterToDialOffsetHz)
+            {
+                var asCenterFromDial = PactorFrequency.DialToCenterHz(observedHz);
+                Consider(asCenterFromDial, centerHz, ref best, ref bestDelta);
+            }
+        }
+
+        return best;
+
+        static void Consider(int candidateHz, int centerHz, ref int? best, ref long bestDelta)
+        {
+            var delta = Math.Abs((long)candidateHz - centerHz);
+            if (delta > MatchToleranceHz || delta >= bestDelta)
+                return;
+
+            bestDelta = delta;
+            best = centerHz;
+        }
     }
 
     public int[] SynchronizeChannels(IReadOnlyCollection<ScanChannel> channels)
