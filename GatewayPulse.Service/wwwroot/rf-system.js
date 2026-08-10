@@ -117,7 +117,8 @@
     add(show('protocolStatus', true), 'Protocol', rf && rf.protocolStatus);
     add(show('lastUpdate', true), 'Last update', rf && rf.lastUpdate ? new Date(rf.lastUpdate).toLocaleString() : null);
     if (rf && rf.comPort) rows.push({ label: 'COM port', value: rf.comPort + (rf.baudRate ? ' @ ' + rf.baudRate : '') });
-    if (rf && rf.lastRawFrameBody) rows.push({ label: 'Last raw frame', value: rf.lastRawFrameBody });
+    // Do not surface lastRawFrameBody here — LP-100A frames embed the meter-programmed
+    // operator callsign. Raw frames remain available on Settings diagnostics only.
     if (rf && rf.error) rows.push({ label: 'Status detail', value: rf.error });
     return rows;
   }

@@ -287,10 +287,13 @@ app.MapGet("/api/rf", async (
     IRfMonitor rfMonitor,
     RfHistoryStore rfHistoryStore,
     RfTransmissionHistoryStore txHistoryStore,
-    RfTransmissionMonitor txMonitor) =>
+    RfTransmissionMonitor txMonitor,
+    Microsoft.Extensions.Options.IOptionsMonitor<GatewayPulseOptions> gatewayOptions) =>
 {
     var telemetry = await rfMonitor.GetTelemetryAsync();
+    // History keeps numeric RF metrics; station identity is presentation-only.
     rfHistoryStore.Record(telemetry);
+    RfTelemetryStationIdentity.ApplyGatewayCallsign(telemetry, gatewayOptions.CurrentValue.Callsign);
     return Results.Json(new
     {
         telemetry,
@@ -388,14 +391,17 @@ app.MapGet("/api/rf/swr-by-frequency", (
 app.MapPost("/api/rf/test-connection", async (
     IRfMonitor rfMonitor,
     IHostEnvironment environment,
-    Microsoft.Extensions.Options.IOptionsMonitor<Lp100MonitorOptions> lpOptions) =>
+    Microsoft.Extensions.Options.IOptionsMonitor<Lp100MonitorOptions> lpOptions,
+    Microsoft.Extensions.Options.IOptionsMonitor<GatewayPulseOptions> gatewayOptions) =>
 {
     var options = lpOptions.CurrentValue;
+    var gatewayCallsign = gatewayOptions.CurrentValue.Callsign;
 
     // If the collector already owns the COM port, report live telemetry instead of opening a second handle.
     if (options.Enabled)
     {
         var live = await rfMonitor.GetTelemetryAsync();
+        RfTelemetryStationIdentity.ApplyGatewayCallsign(live, gatewayCallsign);
         return Results.Json(new
         {
             ok = live.Connected,
@@ -428,6 +434,8 @@ app.MapPost("/api/rf/test-connection", async (
     await process.WaitForExitAsync();
     RfTelemetry? telemetry = null;
     try { telemetry = RfTelemetryJson.Deserialize(stdout); } catch { }
+    if (telemetry is not null)
+        RfTelemetryStationIdentity.ApplyGatewayCallsign(telemetry, gatewayCallsign);
 
     return Results.Json(new
     {

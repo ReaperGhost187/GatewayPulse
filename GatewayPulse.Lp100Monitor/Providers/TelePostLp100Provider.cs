@@ -262,7 +262,9 @@ public sealed class TelePostLp100Provider : IRfMonitor
                 ? null
                 : RfDerivedMetrics.PeakHoldHint,
             MeterAlarmSetpoint = RfDerivedMetrics.AlarmSetpointText(frame.AlarmIndex),
-            Callsign = string.IsNullOrWhiteSpace(frame.Callsign) ? null : frame.Callsign,
+            // Never publish the LP-100A meter-programmed operator callsign. Station
+            // identity is applied later from GatewayPulse:Callsign at the API/UI layer.
+            Callsign = null,
             ComPort = _activePort,
             BaudRate = _baudRate,
             LastRawFrameBody = frame.RawBody,

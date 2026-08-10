@@ -62,7 +62,7 @@ public sealed class MockRfProvider : IRfMonitor
             MeterMode = "Average",
             MeterModeHint = RfDerivedMetrics.PeakHoldHint,
             MeterAlarmSetpoint = "2.0",
-            Callsign = "MOCK",
+            Callsign = null,
             ComPort = "MOCK",
             BaudRate = 115200
         };
@@ -101,7 +101,7 @@ public sealed class MockRfProvider : IRfMonitor
             PowerRange = forward > 500 ? "High" : "Mid",
             MeterMode = "Peak",
             MeterAlarmSetpoint = "2.0",
-            Callsign = "MOCK",
+            Callsign = null,
             ComPort = "MOCK",
             BaudRate = 115200,
             LastRawFrameBody = $"{forward:0.00},50.0,0.0,0,MOCK  ,0,1,40.0,{swr:0.00}"
