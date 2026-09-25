@@ -5,7 +5,7 @@ This package upgrades the proven BatteryProtect integration without changing the
 ## Production paths
 
 ```text
-Installer:          GatewayPulseSetup_v1.2.27.exe
+Installer:          GatewayPulseSetup_v1.2.28.exe
 Service:            C:\Program Files\Gateway Pulse\Service\GatewayPulse.exe
 Collector:          C:\Program Files\Gateway Pulse\Service\VictronMonitor\GatewayPulse.VictronMonitor.exe
 Configuration:      C:\Program Files\Gateway Pulse\Service\appsettings.json
@@ -114,15 +114,15 @@ The installer validates and applies the protected ACL. It never overwrites this 
 Copy these two files to a staging folder on the gateway:
 
 ```text
-GatewayPulseSetup_v1.2.27.exe
-GatewayPulseSetup_v1.2.27.sha256.txt
+GatewayPulseSetup_v1.2.28.exe
+GatewayPulseSetup_v1.2.28.sha256.txt
 ```
 
 Verify before running:
 
 ```powershell
-Get-FileHash .\GatewayPulseSetup_v1.2.27.exe -Algorithm SHA256
-Get-Content .\GatewayPulseSetup_v1.2.27.sha256.txt
+Get-FileHash .\GatewayPulseSetup_v1.2.28.exe -Algorithm SHA256
+Get-Content .\GatewayPulseSetup_v1.2.28.sha256.txt
 ```
 
 The values must match exactly.
@@ -130,7 +130,7 @@ The values must match exactly.
 ## 5. Install or upgrade
 
 ```powershell
-Start-Process .\GatewayPulseSetup_v1.2.27.exe -Verb RunAs -Wait
+Start-Process .\GatewayPulseSetup_v1.2.28.exe -Verb RunAs -Wait
 ```
 
 Installer flow:
@@ -144,7 +144,8 @@ Installer flow:
 On an upgrade, the installed BatteryProtect address/key-file path and any existing SmartShunt configuration are preserved; the displayed BatteryProtect defaults are used only for a fresh configuration. Leaving the SmartShunt option unchecked preserves its existing state. Setup stops the service and tray, replaces binaries, merges only power settings, preserves unrelated JSON and the existing appsettings ACL, protects enabled-device key files, configures automatic startup and service recovery, and starts one supervised collector.
 
 For the station-history release, keep the Victron task selected on an existing gateway. The
-new service scans RMS Relay logs and writes `C:\PWM\StationContactHistory.json` by default.
+new service scans RMS Relay logs and RMS Trimode ADIF files, deduplicates overlapping
+connections, and writes `C:\PWM\StationContactHistory.json` by default.
 If `StationHistory:ArchivePath` is set in `appsettings.json`, back up that path instead.
 Do not uninstall the existing service as an upgrade step: uninstall removes the installed
 configuration folder.
@@ -153,7 +154,7 @@ After installation, allow the first log scan to finish, then check locally:
 
 ```powershell
 $history = Invoke-RestMethod http://127.0.0.1:8080/api/stations
-$history.coverage | Format-List logFolderAvailable,logFilesScanned,archivedContacts,archiveHealthy,oldestContact
+$history.coverage | Format-List logFolderAvailable,logFilesScanned,trimodeFolderAvailable,trimodeFilesScanned,archivedContacts,archiveHealthy,oldestContact
 Test-Path C:\PWM\StationContactHistory.json
 ```
 
@@ -161,7 +162,8 @@ Expect `logFolderAvailable` and `archiveHealthy` to be `True`, the archive file 
 when contacts were found, and `archivedContacts` to match `totalContacts`. Check the
 service log and archive path before proceeding if any check fails. From outside the
 gateway, `/api/status` without a token must return 401; settings and test routes must
-return 403. Confirm the token-configured iPhone app still loads normally.
+return 403; and the dashboard at `/` must return 403. Confirm the token-configured
+iPhone app still loads normally.
 
 For rollback, stop `GatewayPulse`, restore the backed-up `Gateway Pulse` installation
 folder and station archive, then start the service and repeat the local health checks.

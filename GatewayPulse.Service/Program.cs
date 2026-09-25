@@ -128,7 +128,10 @@ var stationHistoryPath = string.IsNullOrWhiteSpace(configuredStationHistoryPath)
 builder.Services.AddSingleton(provider =>
 {
     var gatewayOptions = provider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayPulseOptions>>();
-    return new StationHistoryStore(() => gatewayOptions.CurrentValue.RelayLogs, stationHistoryPath);
+    return new StationHistoryStore(
+        () => gatewayOptions.CurrentValue.RelayLogs,
+        stationHistoryPath,
+        trimodeLogFolder: () => gatewayOptions.CurrentValue.TrimodeLogs);
 });
 var stationHistoryMinutes = builder.Configuration.GetValue("StationHistory:RefreshMinutes", StationHistoryCollector.DefaultIntervalMinutes);
 builder.Services.AddHostedService(provider =>
@@ -146,6 +149,18 @@ builder.Services.AddHostedService<RfAnalysisEventBridge>();
 var app = builder.Build();
 var appsettingsPath = Path.Combine(builder.Environment.ContentRootPath, "appsettings.json");
 
+// The browser dashboard is for the gateway PC. Static-file middleware must run
+// after this check; otherwise a tunnel can fetch index.html before auth runs.
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/api") && !LocalRequestPolicy.IsAllowed(context))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+
+    await next(context);
+});
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.Use(async (context, next) =>

@@ -8,14 +8,17 @@ public sealed class StationHistoryTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "gp-station-history-" + Guid.NewGuid().ToString("N"));
     private readonly string _logs;
+    private readonly string _trimodeLogs;
     private readonly string _archive;
     private static readonly DateTime Now = new(2026, 8, 29, 20, 0, 0);
 
     public StationHistoryTests()
     {
         _logs = Path.Combine(_root, "Logs");
+        _trimodeLogs = Path.Combine(_root, "TrimodeLogs");
         _archive = Path.Combine(_root, "data", "StationContactHistory.json");
         Directory.CreateDirectory(_logs);
+        Directory.CreateDirectory(_trimodeLogs);
     }
 
     public void Dispose()
@@ -34,7 +37,60 @@ public sealed class StationHistoryTests : IDisposable
     }
 
     private StationHistoryStore CreateStore() =>
-        new(() => _logs, _archive, () => Now, TimeZoneInfo.Utc, TimeSpan.Zero);
+        new(() => _logs, _archive, () => Now, TimeZoneInfo.Utc, TimeSpan.Zero, () => _trimodeLogs);
+
+    private static string Adif(string station, string date, string time) =>
+        $"<CALL:{station.Length}>{station}<QSO_DATE:8>{date}<TIME_ON:{time.Length}>{time}<MODE:4>PACT<EOR>";
+
+    [Fact]
+    public void ParsesTrimodeAdifSessionsAcrossYears()
+    {
+        var text = "Trimode export <EOH>" +
+            Adif("NNX1AA-5", "20200403", "111142") + "\n" +
+            Adif("NNX2BB", "20260829", "1805") + "\n" +
+            "<CALL:3>bad<QSO_DATE:8>nonsense<TIME_ON:6>111142<EOR>";
+
+        var contacts = TrimodeAdifLog.Parse(text).ToList();
+
+        Assert.Equal(2, contacts.Count);
+        Assert.Equal("NNX1AA-5", contacts[0].Station);
+        Assert.Equal(new DateTime(2020, 4, 3, 11, 11, 42), contacts[0].LocalTime);
+        Assert.Equal("Trimode", contacts[0].Source);
+        Assert.Equal(new DateTime(2026, 8, 29, 18, 5, 0), contacts[1].LocalTime);
+    }
+
+    [Fact]
+    public void CombinesRelayAndTrimodeWithoutDoubleCountingOverlap()
+    {
+        WriteLog("Events.log", Now, Connection("2026/08/29 18:21:26", "NNX1AA"));
+        File.WriteAllText(Path.Combine(_trimodeLogs, "RMS Trimode_ADIF_202608.adi"),
+            "<EOH>" + Adif("NNX1AA", "20260829", "182125") +
+            Adif("NNX2BB", "20200403", "111142"));
+
+        var store = CreateStore();
+        var summary = store.GetSummary(90);
+        var page = store.GetContacts(null, null, 50);
+
+        Assert.Equal(2, summary.TotalContacts);
+        Assert.Equal(new DateTimeOffset(2020, 4, 3, 11, 11, 42, TimeSpan.Zero), summary.Coverage.OldestContact);
+        Assert.Equal(1, summary.Coverage.TrimodeFilesScanned);
+        Assert.True(summary.Coverage.TrimodeFolderAvailable);
+        Assert.Equal(new[] { "Relay", "Trimode" }, page.Items.Select(c => c.Source));
+
+        File.Delete(Path.Combine(_trimodeLogs, "RMS Trimode_ADIF_202608.adi"));
+        Assert.Equal(2, CreateStore().GetSummary(90).TotalContacts);
+    }
+
+    [Fact]
+    public void ExistingRelayOnlyArchiveLoadsWithSourcePreserved()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_archive)!);
+        File.WriteAllText(_archive,
+            "{\"StartedAt\":\"2026-08-29T20:00:00+00:00\",\"Contacts\":[{\"Time\":\"2026-08-29 18:21:26\",\"Station\":\"NNX1AA\"}]}");
+
+        var page = CreateStore().GetContacts(null, null, 50);
+        Assert.Equal("Relay", Assert.Single(page.Items).Source);
+    }
 
     // MARK: Parsing
 

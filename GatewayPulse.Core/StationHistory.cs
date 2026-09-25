@@ -15,6 +15,12 @@ public readonly record struct RelayStationContact(DateTime LocalTime, string Sta
     public string Key => $"{LocalTime:yyyyMMddHHmmss}|{Station}";
 }
 
+/// <summary>A station connection from either Relay or a Trimode ADIF session.</summary>
+public readonly record struct StationHistoryContact(DateTime LocalTime, string Station, string Source)
+{
+    public string Key => $"{LocalTime:yyyyMMddHHmmss}|{Station}";
+}
+
 /// <summary>Pure parsing and de-duplication for Relay station contacts.</summary>
 public static class RelayStationLog
 {
@@ -74,7 +80,10 @@ public sealed record StationHistoryCoverage(
     bool LogFolderAvailable,
     int ArchivedContacts,
     DateTimeOffset? ArchiveStartedAt,
-    bool ArchiveHealthy);
+    bool ArchiveHealthy,
+    int TrimodeFilesScanned = 0,
+    bool TrimodeFolderAvailable = false,
+    DateTimeOffset? OldestTrimodeContact = null);
 
 public sealed record StationTotal(string Station, int Contacts, DateTimeOffset FirstSeen, DateTimeOffset LastSeen);
 
@@ -111,31 +120,36 @@ public sealed record StationContactPage(
     int TotalMatching);
 
 /// <summary>
-/// Indexes every RMS Relay log for station contacts and keeps a local archive so contacts
-/// survive after RMS Relay prunes old log files. Unchanged log files are not re-read.
+/// Indexes RMS Relay connection logs and RMS Trimode ADIF sessions, reconciling
+/// overlapping records before archiving them for long-term history.
 /// </summary>
 public sealed class StationHistoryStore
 {
-    public const int MaxArchivedContacts = 100_000;
     public const int MaxPageSize = 200;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
     private readonly Func<string> _relayLogFolder;
+    private readonly Func<string>? _trimodeLogFolder;
     private readonly string? _archivePath;
     private readonly Func<DateTime> _localNow;
     private readonly TimeZoneInfo _timeZone;
     private readonly TimeSpan _minRefreshInterval;
     private readonly object _sync = new();
 
-    private readonly Dictionary<string, (DateTime WriteUtc, long Length, List<RelayStationContact> Contacts)> _fileIndex =
+    private readonly Dictionary<string, (DateTime WriteUtc, long Length, List<StationHistoryContact> Contacts)> _fileIndex =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private Dictionary<string, RelayStationContact> _archive = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (DateTime WriteUtc, long Length, List<StationHistoryContact> Contacts)> _trimodeFileIndex =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private Dictionary<string, StationHistoryContact> _archive = new(StringComparer.Ordinal);
     private DateTimeOffset? _archiveStartedAt;
-    private List<RelayStationContact> _contacts = new();
+    private List<StationHistoryContact> _contacts = new();
     private DateTime? _oldestLogContact;
+    private DateTime? _oldestTrimodeContact;
     private bool _logFolderAvailable;
+    private bool _trimodeFolderAvailable;
     private DateTime _lastRefreshUtc = DateTime.MinValue;
     private bool _archiveLoaded;
     private bool _archiveDirty;
@@ -149,9 +163,11 @@ public sealed class StationHistoryStore
         string? archivePath,
         Func<DateTime>? localNow = null,
         TimeZoneInfo? timeZone = null,
-        TimeSpan? minRefreshInterval = null)
+        TimeSpan? minRefreshInterval = null,
+        Func<string>? trimodeLogFolder = null)
     {
         _relayLogFolder = relayLogFolder;
+        _trimodeLogFolder = trimodeLogFolder;
         _archivePath = archivePath;
         _localNow = localNow ?? (() => DateTime.Now);
         _timeZone = timeZone ?? TimeZoneInfo.Local;
@@ -169,24 +185,50 @@ public sealed class StationHistoryStore
 
             LoadArchiveIfNeeded();
             IndexLogFiles();
+            IndexTrimodeFiles();
 
             var fromLogs = _fileIndex.Values.SelectMany(f => f.Contacts).ToList();
+            var fromTrimode = _trimodeFileIndex.Values.SelectMany(f => f.Contacts).ToList();
             _oldestLogContact = fromLogs.Count == 0 ? null : fromLogs.Min(c => c.LocalTime);
+            _oldestTrimodeContact = fromTrimode.Count == 0 ? null : fromTrimode.Min(c => c.LocalTime);
 
             var added = false;
             foreach (var contact in fromLogs)
             {
-                if (_archive.TryAdd(contact.Key, contact))
+                if (!_archive.TryGetValue(contact.Key, out var previous) || previous.Source != "Relay")
+                {
+                    _archive[contact.Key] = contact;
+                    added = true;
+                }
+            }
+
+            // Trimode ADIF and Relay can describe the same session with a one-second
+            // timestamp difference. Prefer the Relay event and keep one contact.
+            var relayKeys = _archive.Values.Where(c => c.Source == "Relay")
+                .Select(c => c.Key).ToHashSet(StringComparer.Ordinal);
+            bool MatchesRelay(StationHistoryContact trimode) =>
+                Enumerable.Range(-2, 5).Any(seconds => relayKeys.Contains(
+                    new StationHistoryContact(trimode.LocalTime.AddSeconds(seconds), trimode.Station, "Relay").Key));
+
+            foreach (var contact in fromTrimode)
+            {
+                if (!MatchesRelay(contact) && _archive.TryAdd(contact.Key, contact))
                     added = true;
             }
 
-            _contacts = RelayStationLog.DeduplicateNewestFirst(_archive.Values);
-            if (_contacts.Count > MaxArchivedContacts)
+            foreach (var trimode in _archive.Values.Where(c => c.Source == "Trimode").ToList())
             {
-                _contacts = _contacts.Take(MaxArchivedContacts).ToList();
-                _archive = _contacts.ToDictionary(c => c.Key, StringComparer.Ordinal);
-                added = true;
+                if (MatchesRelay(trimode))
+                {
+                    _archive.Remove(trimode.Key);
+                    added = true;
+                }
             }
+
+            _contacts = _archive.Values
+                .OrderByDescending(c => c.LocalTime)
+                .ThenBy(c => c.Station, StringComparer.Ordinal)
+                .ToList();
 
             _archiveDirty |= added;
             if (_persistedContactCount > 0 && !string.IsNullOrWhiteSpace(_archivePath) && !File.Exists(_archivePath))
@@ -305,7 +347,7 @@ public sealed class StationHistoryStore
 
     // MARK: - Aggregation
 
-    private static List<DailyContactCount> DailyCounts(IEnumerable<RelayStationContact> contacts, DateTime today, int days)
+    private static List<DailyContactCount> DailyCounts(IEnumerable<StationHistoryContact> contacts, DateTime today, int days)
     {
         var window = Math.Clamp(days, 1, 366);
         var start = today.AddDays(-(window - 1));
@@ -322,7 +364,7 @@ public sealed class StationHistoryStore
             .ToList();
     }
 
-    private static List<HourlyContactCount> HourlyCounts(IEnumerable<RelayStationContact> contacts)
+    private static List<HourlyContactCount> HourlyCounts(IEnumerable<StationHistoryContact> contacts)
     {
         var counts = new int[24];
         foreach (var contact in contacts)
@@ -338,20 +380,23 @@ public sealed class StationHistoryStore
         LogFolderAvailable: _logFolderAvailable,
         ArchivedContacts: _persistedContactCount,
         ArchiveStartedAt: _archiveStartedAt,
-        ArchiveHealthy: _archiveHealthy);
+        ArchiveHealthy: _archiveHealthy,
+        TrimodeFilesScanned: _trimodeFileIndex.Count,
+        TrimodeFolderAvailable: _trimodeFolderAvailable,
+        OldestTrimodeContact: _oldestTrimodeContact.HasValue ? ToOffset(_oldestTrimodeContact.Value) : null);
 
-    private StationContactDto ToDto(RelayStationContact contact) =>
-        new(contact.Key, ToOffset(contact.LocalTime), contact.Station, "Relay");
+    private StationContactDto ToDto(StationHistoryContact contact) =>
+        new(contact.Key, ToOffset(contact.LocalTime), contact.Station, contact.Source);
 
     private DateTimeOffset ToOffset(DateTime localTime) =>
         new(DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified), _timeZone.GetUtcOffset(localTime));
 
     // MARK: - Cursor
 
-    private static string EncodeCursor(RelayStationContact contact) =>
+    private static string EncodeCursor(StationHistoryContact contact) =>
         Convert.ToBase64String(Encoding.UTF8.GetBytes(contact.Key));
 
-    private static bool TryDecodeCursor(string? cursor, out RelayStationContact contact)
+    private static bool TryDecodeCursor(string? cursor, out StationHistoryContact contact)
     {
         contact = default;
         if (string.IsNullOrWhiteSpace(cursor)) return false;
@@ -361,7 +406,7 @@ public sealed class StationHistoryStore
             if (parts.Length != 2 ||
                 !DateTime.TryParseExact(parts[0], "yyyyMMddHHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time))
                 return false;
-            contact = new RelayStationContact(time, parts[1]);
+            contact = new StationHistoryContact(time, parts[1], "Relay");
             return true;
         }
         catch (FormatException)
@@ -412,7 +457,8 @@ public sealed class StationHistoryStore
                     cached.Length == info.Length)
                     continue;
 
-                var contacts = RelayStationLog.ParseLines(ReadSharedLines(file)).ToList();
+                var contacts = RelayStationLog.ParseLines(ReadSharedLines(file))
+                    .Select(c => new StationHistoryContact(c.LocalTime, c.Station, "Relay")).ToList();
                 _fileIndex[file] = (info.LastWriteTimeUtc, info.Length, contacts);
             }
             catch (IOException)
@@ -421,6 +467,51 @@ public sealed class StationHistoryStore
             }
             catch (UnauthorizedAccessException)
             {
+            }
+        }
+    }
+
+    private void IndexTrimodeFiles()
+    {
+        var folder = _trimodeLogFolder?.Invoke();
+        _trimodeFolderAvailable = !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder);
+        if (!_trimodeFolderAvailable)
+        {
+            _trimodeFileIndex.Clear();
+            return;
+        }
+
+        string[] files;
+        try
+        {
+            files = Directory.GetFiles(folder!, "*.adi", SearchOption.AllDirectories)
+                .Concat(Directory.GetFiles(folder!, "*.adif", SearchOption.AllDirectories))
+                .ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        var present = new HashSet<string>(files, StringComparer.OrdinalIgnoreCase);
+        foreach (var stale in _trimodeFileIndex.Keys.Where(k => !present.Contains(k)).ToList())
+            _trimodeFileIndex.Remove(stale);
+
+        foreach (var file in files)
+        {
+            try
+            {
+                var info = new FileInfo(file);
+                if (_trimodeFileIndex.TryGetValue(file, out var cached) &&
+                    cached.WriteUtc == info.LastWriteTimeUtc && cached.Length == info.Length)
+                    continue;
+
+                var contacts = TrimodeAdifLog.Parse(ReadSharedText(file)).ToList();
+                _trimodeFileIndex[file] = (info.LastWriteTimeUtc, info.Length, contacts);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Trimode may be writing this month's file; retry on the next pass.
             }
         }
     }
@@ -436,11 +527,18 @@ public sealed class StationHistoryStore
         return lines;
     }
 
+    private static string ReadSharedText(string file)
+    {
+        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     // MARK: - Archive
 
     private sealed record ArchiveFile(DateTimeOffset StartedAt, List<ArchivedContact> Contacts);
 
-    private sealed record ArchivedContact(string Time, string Station);
+    private sealed record ArchivedContact(string Time, string Station, string Source = "Relay");
 
     private void LoadArchiveIfNeeded()
     {
@@ -487,7 +585,8 @@ public sealed class StationHistoryStore
             if (DateTime.TryParseExact(entry.Time, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time) &&
                 !string.IsNullOrWhiteSpace(entry.Station))
             {
-                var contact = new RelayStationContact(time, entry.Station.ToUpperInvariant());
+                var source = entry.Source == "Trimode" ? "Trimode" : "Relay";
+                var contact = new StationHistoryContact(time, entry.Station.ToUpperInvariant(), source);
                 _archive.TryAdd(contact.Key, contact);
             }
         }
@@ -520,7 +619,7 @@ public sealed class StationHistoryStore
             var payload = new ArchiveFile(
                 startedAt,
                 _contacts
-                    .Select(c => new ArchivedContact(c.LocalTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), c.Station))
+                    .Select(c => new ArchivedContact(c.LocalTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), c.Station, c.Source))
                     .ToList());
 
             var directory = Path.GetDirectoryName(_archivePath);
