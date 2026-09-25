@@ -145,9 +145,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
 
-$Installer = Get-Item .\Installer_Output\GatewayPulseSetup_v1.2.26.exe
+$versionMatch = [regex]::Match((Get-Content .\GatewayPulse.iss -Raw), '#define MyAppVersion "([^"]+)"')
+if (-not $versionMatch.Success) {
+    throw 'Could not read MyAppVersion from GatewayPulse.iss.'
+}
+$Version = $versionMatch.Groups[1].Value
+$Installer = Get-Item (Join-Path $Root "Installer_Output\GatewayPulseSetup_v$Version.exe")
 $Hash = Get-FileHash $Installer.FullName -Algorithm SHA256
-$ChecksumPath = Join-Path $Installer.DirectoryName 'GatewayPulseSetup_v1.2.26.sha256.txt'
+$ChecksumPath = Join-Path $Installer.DirectoryName "GatewayPulseSetup_v$Version.sha256.txt"
 $ChecksumLine = $Hash.Hash.ToLowerInvariant() + '  ' + $Installer.Name + "`n"
 [System.IO.File]::WriteAllText($ChecksumPath, $ChecksumLine, [System.Text.Encoding]::ASCII)
 $VerifiedHash = (Get-FileHash $Installer.FullName -Algorithm SHA256).Hash

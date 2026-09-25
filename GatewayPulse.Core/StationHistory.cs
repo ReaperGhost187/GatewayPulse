@@ -73,7 +73,8 @@ public sealed record StationHistoryCoverage(
     int LogFilesScanned,
     bool LogFolderAvailable,
     int ArchivedContacts,
-    DateTimeOffset? ArchiveStartedAt);
+    DateTimeOffset? ArchiveStartedAt,
+    bool ArchiveHealthy);
 
 public sealed record StationTotal(string Station, int Contacts, DateTimeOffset FirstSeen, DateTimeOffset LastSeen);
 
@@ -137,6 +138,11 @@ public sealed class StationHistoryStore
     private bool _logFolderAvailable;
     private DateTime _lastRefreshUtc = DateTime.MinValue;
     private bool _archiveLoaded;
+    private bool _archiveDirty;
+    private bool _archiveHealthy;
+    private bool _archiveWasCorrupt;
+    private bool _archivePreservationFailed;
+    private int _persistedContactCount;
 
     public StationHistoryStore(
         Func<string> relayLogFolder,
@@ -150,6 +156,7 @@ public sealed class StationHistoryStore
         _localNow = localNow ?? (() => DateTime.Now);
         _timeZone = timeZone ?? TimeZoneInfo.Local;
         _minRefreshInterval = minRefreshInterval ?? TimeSpan.FromSeconds(15);
+        _archiveHealthy = !string.IsNullOrWhiteSpace(archivePath);
     }
 
     public void Refresh(bool force = false)
@@ -181,8 +188,25 @@ public sealed class StationHistoryStore
                 added = true;
             }
 
-            if (added)
-                SaveArchive();
+            _archiveDirty |= added;
+            if (_persistedContactCount > 0 && !string.IsNullOrWhiteSpace(_archivePath) && !File.Exists(_archivePath))
+            {
+                _archiveDirty = true;
+                _archiveHealthy = false;
+            }
+            if (_archiveDirty)
+            {
+                if (SaveArchive())
+                {
+                    _archiveDirty = false;
+                    _persistedContactCount = _contacts.Count;
+                    _archiveHealthy = !_archiveWasCorrupt;
+                }
+                else
+                {
+                    _archiveHealthy = false;
+                }
+            }
         }
     }
 
@@ -312,8 +336,9 @@ public sealed class StationHistoryStore
         OldestLogContact: _oldestLogContact.HasValue ? ToOffset(_oldestLogContact.Value) : null,
         LogFilesScanned: _fileIndex.Count,
         LogFolderAvailable: _logFolderAvailable,
-        ArchivedContacts: _archive.Count,
-        ArchiveStartedAt: _archiveStartedAt);
+        ArchivedContacts: _persistedContactCount,
+        ArchiveStartedAt: _archiveStartedAt,
+        ArchiveHealthy: _archiveHealthy);
 
     private StationContactDto ToDto(RelayStationContact contact) =>
         new(contact.Key, ToOffset(contact.LocalTime), contact.Station, "Relay");
@@ -422,40 +447,78 @@ public sealed class StationHistoryStore
         if (_archiveLoaded) return;
         _archiveLoaded = true;
 
-        if (string.IsNullOrWhiteSpace(_archivePath) || !File.Exists(_archivePath))
+        if (string.IsNullOrWhiteSpace(_archivePath))
             return;
 
-        try
+        var path = _archivePath;
+        _archiveWasCorrupt = File.Exists(path + ".corrupt");
+        if (_archiveWasCorrupt)
+            _archiveHealthy = false;
+        ArchiveFile? payload = null;
+        if (File.Exists(path))
         {
-            var payload = JsonSerializer.Deserialize<ArchiveFile>(File.ReadAllText(_archivePath), JsonOptions);
-            if (payload is null) return;
-
-            _archiveStartedAt = payload.StartedAt;
-            foreach (var entry in payload.Contacts)
+            payload = ReadArchive(path);
+            if (payload is null)
             {
-                if (DateTime.TryParseExact(entry.Time, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time) &&
-                    !string.IsNullOrWhiteSpace(entry.Station))
+                _archiveWasCorrupt = true;
+                _archiveHealthy = false;
+                try
                 {
-                    var contact = new RelayStationContact(time, entry.Station.ToUpperInvariant());
-                    _archive.TryAdd(contact.Key, contact);
+                    // Keep the damaged original for manual recovery before replacing it.
+                    File.Copy(path, path + ".corrupt", overwrite: false);
+                }
+                catch (IOException) when (File.Exists(path + ".corrupt"))
+                {
+                    // An earlier recovery already kept a copy.
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _archivePreservationFailed = true;
                 }
             }
         }
+
+        payload ??= ReadArchive(path + ".bak");
+        if (payload is null) return;
+
+        _archiveStartedAt = payload.StartedAt;
+        foreach (var entry in payload.Contacts)
+        {
+            if (DateTime.TryParseExact(entry.Time, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time) &&
+                !string.IsNullOrWhiteSpace(entry.Station))
+            {
+                var contact = new RelayStationContact(time, entry.Station.ToUpperInvariant());
+                _archive.TryAdd(contact.Key, contact);
+            }
+        }
+        _persistedContactCount = _archive.Count;
+        if (_archiveWasCorrupt || !File.Exists(path))
+            _archiveDirty = true;
+    }
+
+    private static ArchiveFile? ReadArchive(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var payload = JsonSerializer.Deserialize<ArchiveFile>(File.ReadAllText(path), JsonOptions);
+            return payload?.Contacts is null ? null : payload;
+        }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
-            // A damaged archive must not break status; logs are re-indexed and the archive rewritten.
+            return null;
         }
     }
 
-    private void SaveArchive()
+    private bool SaveArchive()
     {
-        if (string.IsNullOrWhiteSpace(_archivePath)) return;
+        if (string.IsNullOrWhiteSpace(_archivePath) || _archivePreservationFailed) return false;
 
         try
         {
-            _archiveStartedAt ??= new DateTimeOffset(_localNow(), _timeZone.GetUtcOffset(_localNow()));
+            var startedAt = _archiveStartedAt ?? new DateTimeOffset(_localNow(), _timeZone.GetUtcOffset(_localNow()));
             var payload = new ArchiveFile(
-                _archiveStartedAt.Value,
+                startedAt,
                 _contacts
                     .Select(c => new ArchivedContact(c.LocalTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), c.Station))
                     .ToList());
@@ -466,11 +529,16 @@ public sealed class StationHistoryStore
 
             var temporaryPath = _archivePath + ".tmp";
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(payload, JsonOptions));
+            if (!_archiveWasCorrupt && File.Exists(_archivePath))
+                File.Copy(_archivePath, _archivePath + ".bak", overwrite: true);
             File.Move(temporaryPath, _archivePath, overwrite: true);
+            _archiveStartedAt = startedAt;
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Archive is best-effort; history is still served from the logs in memory.
+            // Keep the archive dirty and retry on the next collector pass.
+            return false;
         }
     }
 }

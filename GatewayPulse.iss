@@ -1,5 +1,5 @@
 ﻿#define MyAppName "Gateway Pulse"
-#define MyAppVersion "1.2.26"
+#define MyAppVersion "1.2.27"
 #define MyAppPublisher "Gateway Pulse"
 #define MyServiceName "GatewayPulse"
 

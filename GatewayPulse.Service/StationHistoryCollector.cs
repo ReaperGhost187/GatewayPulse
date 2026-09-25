@@ -33,6 +33,8 @@ public sealed class StationHistoryCollector : BackgroundService
                 // Log parsing is synchronous file I/O; keep it off the host's startup path.
                 await Task.Run(() => _store.Refresh(force: true), stoppingToken);
                 var coverage = _store.GetCoverage();
+                if (!coverage.ArchiveHealthy)
+                    _logger.LogWarning("Station history archive is not healthy. Only {Archived} contacts are confirmed on disk; inspect the archive path and any .corrupt file.", coverage.ArchivedContacts);
                 _logger.LogDebug(
                     "Station history indexed: {Archived} contacts, {Files} Relay log files, oldest {Oldest}.",
                     coverage.ArchivedContacts,

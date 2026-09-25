@@ -42,6 +42,11 @@ an archive:
 - Default path: `StationContactHistory.json` next to the RF telemetry file.
 - Override with `StationHistory:ArchivePath` in `appsettings.json`.
 - Capped at the newest 100,000 contacts.
+- `coverage.archiveHealthy` is false if the archive cannot be saved or a damaged archive was
+  recovered. `archivedContacts` counts contacts confirmed in the saved file, not just memory.
+  Failed writes are retried on every collector pass. The previous good archive is kept as
+  `.bak`; a damaged primary is preserved as `.corrupt` for manual review. Do not remove that
+  file until its contacts have been checked against the recovered archive.
 
 Once archived, contacts survive RMS Relay pruning its logs. Contacts pruned before the archive
 first ran cannot be recovered. The `coverage` object reports `oldestContact` (archive plus logs),

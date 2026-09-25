@@ -392,6 +392,51 @@ public sealed class StationHistoryTests : IDisposable
 
         Assert.Equal(1, summary.TotalContacts);
         Assert.Contains("NNX1AA", File.ReadAllText(_archive));
+        Assert.False(summary.Coverage.ArchiveHealthy);
+        Assert.True(File.Exists(_archive + ".corrupt"));
+    }
+
+    [Fact]
+    public void ArchiveWriteFailureRetriesWithoutAnotherContact()
+    {
+        WriteLog("Events.log", Now, Connection("2026/08/29 18:21:26", "NNX1AA"));
+        Directory.CreateDirectory(Path.GetDirectoryName(_archive)!);
+        Directory.CreateDirectory(_archive); // A directory at the file path makes replacement fail.
+
+        var store = CreateStore();
+        store.Refresh(force: true);
+        Assert.False(store.GetCoverage().ArchiveHealthy);
+        Assert.Equal(0, store.GetCoverage().ArchivedContacts);
+
+        Directory.Delete(_archive);
+        store.Refresh(force: true);
+        Assert.True(store.GetCoverage().ArchiveHealthy);
+        Assert.Equal(1, store.GetCoverage().ArchivedContacts);
+
+        File.Delete(Path.Combine(_logs, "Events.log"));
+        Assert.Equal(1, CreateStore().GetSummary(7).TotalContacts);
+    }
+
+    [Fact]
+    public void DamagedPrimaryRecoversFromBackupAndKeepsOriginalForReview()
+    {
+        WriteLog("Events.log", Now, Connection("2026/08/29 18:11:05", "NNX1AA"));
+        var store = CreateStore();
+        store.Refresh(force: true);
+        WriteLog("Events.log", Now.AddMinutes(1),
+            Connection("2026/08/29 18:11:05", "NNX1AA"),
+            Connection("2026/08/29 18:21:26", "NNX2BB"));
+        store.Refresh(force: true);
+        Assert.True(File.Exists(_archive + ".bak"));
+
+        File.WriteAllText(_archive, "{ damaged json");
+        File.Delete(Path.Combine(_logs, "Events.log"));
+        var recovered = CreateStore().GetSummary(7);
+
+        Assert.Equal(1, recovered.TotalContacts);
+        Assert.Equal("NNX1AA", recovered.LatestContact?.Station);
+        Assert.False(recovered.Coverage.ArchiveHealthy);
+        Assert.Contains("damaged json", File.ReadAllText(_archive + ".corrupt"));
     }
 
     [Fact]
