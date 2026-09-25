@@ -5,7 +5,8 @@ Gateway Pulse reports RMS Relay and RMS Trimode station connections to the mobil
 ## What counts as a contact
 
 One connection is either an RMS Relay `HF client connection from CALLSIGN` line or an
-RMS Trimode ADIF record with a callsign, `QSO_DATE`, and `TIME_ON`. An SSID suffix is
+RMS Trimode ADIF record with a callsign, `QSO_DATE`, and `TIME_ON`. ADIF UTC times are
+converted to the gateway's local clock before comparison with Relay logs. An SSID suffix is
 kept, so `KX7ABC-5` and `KX7ABC` are separate stations. Duplicate copies of the
 same record count once. When Relay and Trimode timestamps for the same callsign
 are within two seconds, they represent one connection and the Relay record wins.

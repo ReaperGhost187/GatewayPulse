@@ -5,8 +5,8 @@ namespace GatewayPulse.Core;
 
 /// <summary>
 /// Reads individual RMS Trimode ADIF sessions. Field lengths, rather than line breaks,
-/// delimit values; one record ends at &lt;EOR&gt;. QSO_DATE and TIME_ON are gateway-local
-/// in the gateway's Trimode exports, matching its Relay log clock.
+/// delimit values; one record ends at &lt;EOR&gt;. ADIF QSO_DATE and TIME_ON are UTC,
+/// converted to the gateway's local clock for comparison with Relay log timestamps.
 /// </summary>
 public static class TrimodeAdifLog
 {
@@ -18,8 +18,9 @@ public static class TrimodeAdifLog
         @"^[A-Z0-9]+(?:-[0-9]{1,2})?$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public static IEnumerable<StationHistoryContact> Parse(string text)
+    public static IEnumerable<StationHistoryContact> Parse(string text, TimeZoneInfo? timeZone = null)
     {
+        var gatewayTimeZone = timeZone ?? TimeZoneInfo.Utc;
         var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var offset = 0;
         while (offset < text.Length)
@@ -33,7 +34,7 @@ public static class TrimodeAdifLog
             offset = close + 1;
             if (header.Equals("EOR", StringComparison.OrdinalIgnoreCase))
             {
-                if (TryContact(fields, out var contact)) yield return contact;
+                if (TryContact(fields, gatewayTimeZone, out var contact)) yield return contact;
                 fields.Clear();
                 continue;
             }
@@ -53,7 +54,7 @@ public static class TrimodeAdifLog
         }
     }
 
-    private static bool TryContact(IReadOnlyDictionary<string, string> fields, out StationHistoryContact contact)
+    private static bool TryContact(IReadOnlyDictionary<string, string> fields, TimeZoneInfo gatewayTimeZone, out StationHistoryContact contact)
     {
         contact = default;
         if (!fields.TryGetValue("CALL", out var call) ||
@@ -69,7 +70,8 @@ public static class TrimodeAdifLog
                 CultureInfo.InvariantCulture, DateTimeStyles.None, out var localTime))
             return false;
 
-        contact = new StationHistoryContact(localTime, station, "Trimode");
+        var gatewayLocalTime = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(localTime, DateTimeKind.Utc), gatewayTimeZone);
+        contact = new StationHistoryContact(gatewayLocalTime, station, "Trimode");
         return true;
     }
 }

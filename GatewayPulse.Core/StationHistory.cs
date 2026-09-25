@@ -506,7 +506,7 @@ public sealed class StationHistoryStore
                     cached.WriteUtc == info.LastWriteTimeUtc && cached.Length == info.Length)
                     continue;
 
-                var contacts = TrimodeAdifLog.Parse(ReadSharedText(file)).ToList();
+                var contacts = TrimodeAdifLog.Parse(ReadSharedText(file), _timeZone).ToList();
                 _trimodeFileIndex[file] = (info.LastWriteTimeUtc, info.Length, contacts);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

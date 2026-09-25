@@ -60,6 +60,14 @@ public sealed class StationHistoryTests : IDisposable
     }
 
     [Fact]
+    public void TrimodeUtcTimeConvertsToGatewayLocalClock()
+    {
+        var gatewayZone = TimeZoneInfo.CreateCustomTimeZone("Gateway-7", TimeSpan.FromHours(-7), "Gateway", "Gateway");
+        var contact = Assert.Single(TrimodeAdifLog.Parse(Adif("NNX1AA", "20260829", "182126"), gatewayZone));
+        Assert.Equal(new DateTime(2026, 8, 29, 11, 21, 26), contact.LocalTime);
+    }
+
+    [Fact]
     public void CombinesRelayAndTrimodeWithoutDoubleCountingOverlap()
     {
         WriteLog("Events.log", Now, Connection("2026/08/29 18:21:26", "NNX1AA"));
