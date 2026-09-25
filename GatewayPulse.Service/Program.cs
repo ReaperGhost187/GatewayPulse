@@ -119,6 +119,23 @@ builder.Services.AddHostedService(provider =>
         provider.GetRequiredService<ILogger<RfHistoryCollector>>()));
 
 builder.Services.AddSingleton<GatewayPulseService>();
+var configuredStationHistoryPath = builder.Configuration["StationHistory:ArchivePath"];
+var stationHistoryPath = string.IsNullOrWhiteSpace(configuredStationHistoryPath)
+    ? Path.Combine(Path.GetDirectoryName(rfTelemetryPath) ?? builder.Environment.ContentRootPath, "StationContactHistory.json")
+    : (Path.IsPathRooted(configuredStationHistoryPath)
+        ? configuredStationHistoryPath
+        : Path.Combine(builder.Environment.ContentRootPath, configuredStationHistoryPath));
+builder.Services.AddSingleton(provider =>
+{
+    var gatewayOptions = provider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayPulseOptions>>();
+    return new StationHistoryStore(() => gatewayOptions.CurrentValue.RelayLogs, stationHistoryPath);
+});
+var stationHistoryMinutes = builder.Configuration.GetValue("StationHistory:RefreshMinutes", StationHistoryCollector.DefaultIntervalMinutes);
+builder.Services.AddHostedService(provider =>
+    new StationHistoryCollector(
+        provider.GetRequiredService<StationHistoryStore>(),
+        provider.GetRequiredService<ILogger<StationHistoryCollector>>(),
+        TimeSpan.FromMinutes(Math.Clamp(stationHistoryMinutes, 1, 60))));
 builder.Services.AddSingleton<PushoverService>();
 builder.Services.AddVictronMonitorSupervision(builder.Configuration);
 builder.Services.AddLp100MonitorSupervision(builder.Configuration);
@@ -138,7 +155,7 @@ app.Use(async (context, next) =>
         context.Request.Path.StartsWithSegments("/api/testalert") ||
         context.Request.Path.StartsWithSegments("/api/rf/test-connection") ||
         context.Request.Path.StartsWithSegments("/api/radiocat");
-    if (isSensitiveApi && !LocalRequestPolicy.IsAllowed(context.Connection))
+    if (isSensitiveApi && !LocalRequestPolicy.IsAllowed(context))
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         await context.Response.WriteAsJsonAsync(new
@@ -221,6 +238,18 @@ app.MapGet("/api/live-radio", (
 
     return Results.Json(live);
 });
+
+// Station contact history (RMS Relay "HF client connection" lines), archived beyond Relay log retention.
+app.MapGet("/api/stations", (StationHistoryStore stations, int? days) =>
+    Results.Json(stations.GetSummary(days ?? 30)));
+
+app.MapGet("/api/stations/contacts", (StationHistoryStore stations, string? station, string? cursor, int? limit) =>
+    Results.Json(stations.GetContacts(station, cursor, limit ?? 50)));
+
+app.MapGet("/api/stations/{callsign}", (StationHistoryStore stations, string callsign, int? days) =>
+    stations.GetStation(callsign, days ?? 90) is { } detail
+        ? Results.Json(detail)
+        : Results.NotFound(new { error = "station_not_found" }));
 
 app.MapGet("/api/settings/com-ports", () =>
 {

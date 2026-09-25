@@ -5,6 +5,36 @@ namespace GatewayPulse.ServiceHosting;
 
 public static class LocalRequestPolicy
 {
+    /// <summary>
+    /// Headers added by reverse proxies and tunnels. Cloudflare Tunnel (cloudflared) runs on the
+    /// gateway PC and connects to Kestrel over loopback, so a tunneled internet request has a
+    /// loopback socket address. These headers are how we tell it apart from a genuinely local caller.
+    /// </summary>
+    internal static readonly string[] ProxyHeaders =
+    {
+        "CF-Connecting-IP",
+        "CF-Ray",
+        "True-Client-IP",
+        "X-Forwarded-For",
+        "X-Forwarded-Host",
+        "X-Real-IP",
+        "Forwarded"
+    };
+
+    /// <summary>
+    /// True only for requests made on the gateway PC itself: a loopback socket that did not
+    /// arrive through a proxy or tunnel.
+    /// </summary>
+    public static bool IsAllowed(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return IsAllowed(context.Connection) && !IsProxied(context.Request.Headers);
+    }
+
+    public static bool IsProxied(IHeaderDictionary headers) =>
+        ProxyHeaders.Any(header => headers.ContainsKey(header));
+
+    /// <summary>Socket-level check only. Use <see cref="IsAllowed(HttpContext)"/> for request decisions.</summary>
     public static bool IsAllowed(ConnectionInfo connection)
     {
         ArgumentNullException.ThrowIfNull(connection);

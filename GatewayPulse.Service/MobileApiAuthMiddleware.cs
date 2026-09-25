@@ -32,7 +32,7 @@ public sealed class MobileApiAuthMiddleware
             return;
         }
 
-        if (LocalRequestPolicy.IsAllowed(context.Connection))
+        if (LocalRequestPolicy.IsAllowed(context))
         {
             await _next(context);
             return;
@@ -68,6 +68,7 @@ public sealed class MobileApiAuthMiddleware
         path.StartsWithSegments("/api/rf") ||
         path.StartsWithSegments("/api/preferences") ||
         path.StartsWithSegments("/api/network-map") ||
+        path.StartsWithSegments("/api/stations") ||
         path.StartsWithSegments("/api/mobile");
 
     public static bool IsMobileApiPath(PathString path) =>

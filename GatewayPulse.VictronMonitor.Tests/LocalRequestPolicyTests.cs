@@ -56,4 +56,39 @@ public sealed class LocalRequestPolicyTests
 
         Assert.True(LocalRequestPolicy.IsAllowed(context.Connection));
     }
+
+    [Fact]
+    public void Request_DirectLoopbackWithoutProxyHeaders_IsLocal()
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Loopback;
+
+        Assert.True(LocalRequestPolicy.IsAllowed(context));
+    }
+
+    [Theory]
+    [InlineData("CF-Connecting-IP")]
+    [InlineData("CF-Ray")]
+    [InlineData("True-Client-IP")]
+    [InlineData("X-Forwarded-For")]
+    [InlineData("X-Forwarded-Host")]
+    [InlineData("X-Real-IP")]
+    [InlineData("Forwarded")]
+    public void Request_LoopbackThroughProxyOrTunnel_IsNotLocal(string header)
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Loopback;
+        context.Request.Headers[header] = "203.0.113.7";
+
+        Assert.False(LocalRequestPolicy.IsAllowed(context));
+    }
+
+    [Fact]
+    public void Request_LanAddress_IsNotLocal()
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Parse("192.168.1.25");
+
+        Assert.False(LocalRequestPolicy.IsAllowed(context));
+    }
 }

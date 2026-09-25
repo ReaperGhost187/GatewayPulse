@@ -23,6 +23,9 @@ public sealed class MobileApiAuthTests
     [InlineData("/api/rf/swr-by-frequency", true)]
     [InlineData("/api/preferences", true)]
     [InlineData("/api/network-map", true)]
+    [InlineData("/api/stations", true)]
+    [InlineData("/api/stations/contacts", true)]
+    [InlineData("/api/stations/NNX1AA", true)]
     [InlineData("/api/mobile/hello", true)]
     [InlineData("/api/settings", false)]
     [InlineData("/api/testalert", false)]
@@ -175,11 +178,45 @@ public sealed class MobileApiAuthTests
         return new MobileApiTokenValidator(monitor);
     }
 
+    // Cloudflare Tunnel connects to Kestrel over loopback; its requests must still present a token.
+    [Theory]
+    [InlineData("CF-Connecting-IP", "203.0.113.7")]
+    [InlineData("CF-Ray", "a40c6848ec33ff0a-PDX")]
+    [InlineData("X-Forwarded-For", "203.0.113.7")]
+    [InlineData("Forwarded", "for=203.0.113.7")]
+    public async Task TunneledLoopbackRequest_WithoutToken_IsRejected(string header, string value)
+    {
+        var (status, _) = await InvokeAsync(
+            "127.0.0.1", "/api/status", "secret-token", authorization: null,
+            new Dictionary<string, string> { [header] = value });
+
+        Assert.Equal(StatusCodes.Status401Unauthorized, status);
+    }
+
+    [Fact]
+    public async Task TunneledLoopbackRequest_WithToken_IsAllowed()
+    {
+        var (status, _) = await InvokeAsync(
+            "127.0.0.1", "/api/stations", "secret-token", "Bearer secret-token",
+            new Dictionary<string, string> { ["CF-Connecting-IP"] = "203.0.113.7" });
+
+        Assert.Equal(StatusCodes.Status200OK, status);
+    }
+
+    [Fact]
+    public async Task DirectLoopbackRequest_WithoutToken_IsStillAllowed()
+    {
+        var (status, _) = await InvokeAsync("127.0.0.1", "/api/stations", "secret-token", authorization: null);
+
+        Assert.Equal(StatusCodes.Status200OK, status);
+    }
+
     private static async Task<(int StatusCode, string Body)> InvokeAsync(
         string remoteIp,
         string path,
         string apiToken,
-        string? authorization)
+        string? authorization,
+        IDictionary<string, string>? headers = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -205,6 +242,8 @@ public sealed class MobileApiAuthTests
         context.Request.Path = path;
         if (authorization is not null)
             context.Request.Headers.Authorization = authorization;
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>())
+            context.Request.Headers[name] = value;
 
         context.Response.Body = new MemoryStream();
 

@@ -1132,45 +1132,70 @@ public sealed class GatewayPulseService
         List<HourlyActivity> hourlyActivity)
     {
         var options = _options.CurrentValue;
+        ApplyRelayLogLines(
+            NewestFiles(options.RelayLogs, new[] { "Events*.log", "*.log" }, 200).SelectMany(SafeReadLines),
+            status,
+            eventsList,
+            stationCounts,
+            stationConnections,
+            hourlyActivity);
+    }
 
-        foreach (var file in NewestFiles(options.RelayLogs, new[] { "Events*.log", "*.log" }, 200))
+    /// <summary>
+    /// Applies Relay log lines to status. The same contact can appear in more than one Relay
+    /// log file, so each unique (timestamp, station) is counted once, and the newest line wins
+    /// for LastStation / LastRelayEvent regardless of file read order.
+    /// </summary>
+    internal static void ApplyRelayLogLines(
+        IEnumerable<string> lines,
+        GatewayStatus status,
+        List<GatewayEvent> eventsList,
+        Dictionary<string, int> stationCounts,
+        List<StationConnection> stationConnections,
+        List<HourlyActivity> hourlyActivity)
+    {
+        var seenContacts = new HashSet<string>(StringComparer.Ordinal);
+        DateTime? newestStationTime = null;
+
+        foreach (var line in lines)
         {
-            foreach (var line in SafeReadLines(file))
+            var ts = ExtractTimestamp(line);
+            if (ts is null) continue;
+
+            if (line.Contains("RMS Relay started", StringComparison.OrdinalIgnoreCase))
             {
-                var ts = ExtractTimestamp(line);
-                if (ts is null) continue;
-
-                if (line.Contains("RMS Relay started", StringComparison.OrdinalIgnoreCase))
-                {
-                    status.LastRelayEvent = ts;
-                    SetIfNewer(ts, value => status.LastRelayStart = value, status.LastRelayStart);
-                    eventsList.Add(new GatewayEvent(ts, "Relay", "Startup", "RMS Relay started"));
-                }
-
-                if (line.Contains("RMS Relay is stopping", StringComparison.OrdinalIgnoreCase))
-                {
-                    status.LastRelayEvent = ts;
-                    eventsList.Add(new GatewayEvent(ts, "Relay", "Stopping", "RMS Relay stopping"));
-                }
-
-                var m = Regex.Match(line, @"HF client connection from\s+([A-Z0-9]+)", RegexOptions.IgnoreCase);
-                if (m.Success)
-                {
-                    var station = m.Groups[1].Value.ToUpperInvariant();
-                    status.LastStation = station;
-                    status.LastRelayEvent = ts;
-                    stationCounts[station] = stationCounts.TryGetValue(station, out var c) ? c + 1 : 1;
-                    stationConnections.Add(new StationConnection
-                    {
-                        Timestamp = ts,
-                        Station = station,
-                        Source = "Relay",
-                        Detail = "HF client connection"
-                    });
-                    IncrementHourlyActivity(hourlyActivity, ParseAnyTime(ts), a => a.RelayConnections++);
-                    eventsList.Add(new GatewayEvent(ts, "Relay", "HF Connection", $"HF client connection from {station}"));
-                }
+                SetIfNewer(ts, value => status.LastRelayEvent = value, status.LastRelayEvent);
+                SetIfNewer(ts, value => status.LastRelayStart = value, status.LastRelayStart);
+                eventsList.Add(new GatewayEvent(ts, "Relay", "Startup", "RMS Relay started"));
             }
+
+            if (line.Contains("RMS Relay is stopping", StringComparison.OrdinalIgnoreCase))
+            {
+                SetIfNewer(ts, value => status.LastRelayEvent = value, status.LastRelayEvent);
+                eventsList.Add(new GatewayEvent(ts, "Relay", "Stopping", "RMS Relay stopping"));
+            }
+
+            if (!RelayStationLog.TryParseContact(line, out var contact) || !seenContacts.Add(contact.Key))
+                continue;
+
+            var station = contact.Station;
+            if (!newestStationTime.HasValue || contact.LocalTime > newestStationTime.Value)
+            {
+                newestStationTime = contact.LocalTime;
+                status.LastStation = station;
+            }
+
+            SetIfNewer(ts, value => status.LastRelayEvent = value, status.LastRelayEvent);
+            stationCounts[station] = stationCounts.TryGetValue(station, out var c) ? c + 1 : 1;
+            stationConnections.Add(new StationConnection
+            {
+                Timestamp = ts,
+                Station = station,
+                Source = "Relay",
+                Detail = "HF client connection"
+            });
+            IncrementHourlyActivity(hourlyActivity, contact.LocalTime, a => a.RelayConnections++);
+            eventsList.Add(new GatewayEvent(ts, "Relay", "HF Connection", $"HF client connection from {station}"));
         }
     }
 
