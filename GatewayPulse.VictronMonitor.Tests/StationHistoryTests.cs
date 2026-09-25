@@ -47,16 +47,19 @@ public sealed class StationHistoryTests : IDisposable
     {
         var text = "Trimode export <EOH>" +
             Adif("NNX1AA-5", "20200403", "111142") + "\n" +
-            Adif("NNX2BB", "20260829", "1805") + "\n" +
+            Adif("NNX2BB-R", "20260829", "1805") + "\n" +
+            Adif("NNX3CC/P", "20260829", "1806") + "\n" +
             "<CALL:3>bad<QSO_DATE:8>nonsense<TIME_ON:6>111142<EOR>";
 
         var contacts = TrimodeAdifLog.Parse(text).ToList();
 
-        Assert.Equal(2, contacts.Count);
+        Assert.Equal(3, contacts.Count);
         Assert.Equal("NNX1AA-5", contacts[0].Station);
         Assert.Equal(new DateTime(2020, 4, 3, 11, 11, 42), contacts[0].LocalTime);
         Assert.Equal("Trimode", contacts[0].Source);
         Assert.Equal(new DateTime(2026, 8, 29, 18, 5, 0), contacts[1].LocalTime);
+        Assert.Equal("NNX2BB-R", contacts[1].Station);
+        Assert.Equal("NNX3CC/P", contacts[2].Station);
     }
 
     [Fact]
@@ -65,6 +68,24 @@ public sealed class StationHistoryTests : IDisposable
         var gatewayZone = TimeZoneInfo.CreateCustomTimeZone("Gateway-7", TimeSpan.FromHours(-7), "Gateway", "Gateway");
         var contact = Assert.Single(TrimodeAdifLog.Parse(Adif("NNX1AA", "20260829", "182126"), gatewayZone));
         Assert.Equal(new DateTime(2026, 8, 29, 11, 21, 26), contact.LocalTime);
+    }
+
+    [Fact]
+    public void HealthAndSfiUpdatesAreNotStationConnections()
+    {
+        var adif = "<SFI:3>145<QSO_DATE:8>20260829<TIME_ON:6>182126<EOR>" +
+            "<COMMENT:12>Health check<QSO_DATE:8>20260829<TIME_ON:6>182127<EOR>" +
+            Adif("NNX1AA-R", "20260829", "182128");
+        var contact = Assert.Single(TrimodeAdifLog.Parse(adif));
+        Assert.Equal("NNX1AA-R", contact.Station);
+
+        var relayEvents = new[]
+        {
+            "2026/08/29 18:21:26 SFI = 145",
+            "2026/08/29 18:21:27 Health check passed",
+            Connection("2026/08/29 18:21:28", "NNX1AA-R")
+        };
+        Assert.Equal("NNX1AA-R", Assert.Single(RelayStationLog.ParseLines(relayEvents)).Station);
     }
 
     [Fact]
@@ -105,6 +126,8 @@ public sealed class StationHistoryTests : IDisposable
     [Theory]
     [InlineData("2026/08/29 18:21:26 HF client connection from NNX1AA", "NNX1AA", 18, 21, 26)]
     [InlineData("2026-08-29 07:05:00 *** HF client connection from nnx2bb on 7102.0", "NNX2BB", 7, 5, 0)]
+    [InlineData("2026-08-29 07:05:00 HF client connection from nnx2bb-r on 7102.0", "NNX2BB-R", 7, 5, 0)]
+    [InlineData("2026-08-29 07:05:00 HF client connection from nnx3cc/p on 7102.0", "NNX3CC/P", 7, 5, 0)]
     public void ParsesRelayConnectionLines(string line, string station, int hour, int minute, int second)
     {
         Assert.True(RelayStationLog.TryParseContact(line, out var contact));

@@ -15,7 +15,9 @@ public static class TrimodeAdifLog
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex Callsign = new(
-        @"^[A-Z0-9]+(?:-[0-9]{1,2})?$",
+        // Trimode records include gateway suffixes such as -R as well as numeric
+        // SSIDs and portable callsigns. Keep the complete station identifier.
+        @"^[A-Z0-9]+(?:[-/][A-Z0-9]+)*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static IEnumerable<StationHistoryContact> Parse(string text, TimeZoneInfo? timeZone = null)

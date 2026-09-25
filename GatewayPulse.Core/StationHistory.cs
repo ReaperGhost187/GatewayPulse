@@ -25,8 +25,9 @@ public readonly record struct StationHistoryContact(DateTime LocalTime, string S
 public static class RelayStationLog
 {
     private static readonly Regex ConnectionPattern =
-        // Keeps an SSID suffix (KX7ABC-5) so SSIDs are counted as distinct stations.
-        new(@"HF client connection from\s+([A-Z0-9]+(?:-\d{1,2})?)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Keep numeric SSIDs, gateway suffixes (such as -R), and portable callsigns
+        // intact so Relay and Trimode records identify the same station.
+        new(@"HF client connection from\s+([A-Z0-9]+(?:[-/][A-Z0-9]+)*)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TimestampPattern =
         new(@"^(\d{4}[-/]\d{2}[-/]\d{2} \d{2}:\d{2}:\d{2})", RegexOptions.Compiled);
